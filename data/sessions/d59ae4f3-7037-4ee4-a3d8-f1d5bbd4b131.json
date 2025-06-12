@@ -1,0 +1,9 @@
+{
+  "session_id": "d59ae4f3-7037-4ee4-a3d8-f1d5bbd4b131",
+  "timestamp": "2025-06-12T16:19:50.732787",
+  "founder_transcript": " Hey, how are you?",
+  "investor_response": "\"Nice to meet you.  Your pitch is... brief.  Tell me about your business model, your key metrics (customer acquisition cost, average revenue per user, lifetime value), and your market size.  What's your traction to date \u2013  how many paying customers do you have?  And what's your projected path to profitability?\"\n",
+  "investor_persona": "skeptical",
+  "original_audio": "data/uploads/d59ae4f3-7037-4ee4-a3d8-f1d5bbd4b131_hello-48300.mp3",
+  "response_audio": "data/responses/d59ae4f3-7037-4ee4-a3d8-f1d5bbd4b131_response.mp3"
+}

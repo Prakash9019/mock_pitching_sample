@@ -1,0 +1,9 @@
+{
+  "session_id": "8a505e6c-3da3-4a72-8a92-77c98ecee751",
+  "timestamp": "2025-06-12T16:24:09.430240",
+  "founder_transcript": " Hey, how are you?",
+  "investor_response": "\"Nice to meet you.  Your pitch is... lacking.  Let's start with the basics:\n\n1. What problem does your company solve?  Quantify the market size and your target segment.\n2. What's your current revenue, customer acquisition cost (CAC), and lifetime value (LTV)? Show me your unit economics.\n3. What's your churn rate?  How are you retaining customers?\n4. What's your projected revenue for the next 12-24 months, and what's your path to profitability?  Show me the model.\n5. What's your competitive landscape, and what's your defensible advantage?\n6. What evidence do you have of product-market fit? Show me user growth and engagement metrics.\"\n",
+  "investor_persona": "skeptical",
+  "original_audio": "data/uploads/8a505e6c-3da3-4a72-8a92-77c98ecee751_hello-48300.mp3",
+  "response_audio": "data/responses/8a505e6c-3da3-4a72-8a92-77c98ecee751_response.mp3"
+}
