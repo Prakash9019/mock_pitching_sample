@@ -61,14 +61,31 @@ async def root():
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>🎙️ AI Investor Pitch</title>
-      <style>
-        body {
-          font-family: Arial, sans-serif;
-          max-width: 800px;
-          margin: 0 auto;
-          padding: 20px;
-          text-align: center;
-        }
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+          }
+          
+          /* Audio level indicator */
+          #audio-level-container {
+            width: 100%;
+            height: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow: hidden;
+          }
+          
+          #audio-level {
+            height: 100%;
+            width: 0%;
+            background: #2196F3;
+            transition: width 0.1s, background-color 0.3s;
+          }
         .controls {
           margin: 30px 0;
         }
@@ -134,9 +151,12 @@ async def root():
         </div>
         <div>
           <button id="startBtn">🚀 Start Meeting</button>
-          <button id="recordBtn">🎙️ Record</button>
-          <button id="pauseBtn">⏸️ Pause & Send</button>
-          <button id="endBtn">🏁 End Session</button>
+          <button id="recordBtn" style="display: none;">🎙️ Record</button>
+          <button id="pauseBtn" style="display: none;">⏸️ Pause</button>
+          <button id="endBtn" style="display: none;">⏹️ End Meeting</button>
+          <div id="audio-level-container" style="display: none;">
+            <div id="audio-level"></div>
+          </div>
         </div>
       </div>
       
@@ -204,11 +224,36 @@ async def root():
             updateStatus('Initializing meeting...', 'info');
             initSocket();
             
-            // Request microphone access
-            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Audio constraints for better quality
+            const audioConstraints = {
+              audio: {
+                channelCount: 1,  // Mono audio is sufficient for speech
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 16000,  // 16kHz sample rate is good for speech
+                sampleSize: 16,     // 16-bit samples
+                mimeType: 'audio/webm;codecs=opus'  // Use Opus codec for better quality
+              },
+              video: false
+            };
+
+            // MediaRecorder options
+            const recorderOptions = {
+              mimeType: 'audio/webm;codecs=opus',
+              audioBitsPerSecond: 128000  // 128kbps for good quality
+            };
+
+            // Request microphone access with better settings
+            audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
             
-            // Initialize media recorder
-            mediaRecorder = new MediaRecorder(audioStream);
+            // Setup audio level monitoring
+            setupAudioMeter(audioStream);
+            
+            // Initialize media recorder with better settings
+            mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+            
+            // Handle data available event
             mediaRecorder.ondataavailable = (event) => {
               if (event.data.size > 0) {
                 audioChunks.push(event.data);
@@ -304,6 +349,33 @@ async def root():
             socket.disconnect();
           }
         });
+
+        // Audio level monitoring function
+        function setupAudioMeter(stream) {
+          try {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            source.connect(analyser);
+            
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            function checkLevel() {
+              analyser.getByteFrequencyData(dataArray);
+              const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+              // Visual feedback for audio level
+              const levelIndicator = document.getElementById('audio-level');
+              if (levelIndicator) {
+                levelIndicator.style.width = `${Math.min(100, average)}%`;
+                levelIndicator.style.backgroundColor = average > 50 ? '#4CAF50' : '#2196F3';
+              }
+              requestAnimationFrame(checkLevel);
+            }
+            checkLevel();
+          } catch (error) {
+            console.warn('Audio level monitoring not available:', error);
+          }
+        }
 
         // Check for browser support
         if (!navigator.mediaDevices || !window.MediaRecorder) {
@@ -490,8 +562,11 @@ async def audio_chunk(sid, data):
         
         try:
             logger.info("Starting transcription...")
-            transcript = transcribe_audio(temp_audio_path)
-            logger.info(f"Transcription complete: {transcript[:100]}...")
+            transcription_result = transcribe_audio(temp_audio_path)
+            transcript_text = transcription_result.get('text', '')
+            confidence = transcription_result.get('confidence', 0.0)
+            
+            logger.info(f"Transcription complete (confidence: {confidence:.2f}): {transcript_text[:100]}...")
             
             # Initialize conversation state if it doesn't exist or if persona has changed
             from services.ai_response import start_new_conversation
@@ -500,7 +575,7 @@ async def audio_chunk(sid, data):
                 logger.info(f"Started new conversation with {persona} persona")
             
             logger.info("Generating investor response...")
-            investor_reply = generate_investor_response(conversation_states[sid], transcript)
+            investor_reply = generate_investor_response(conversation_states[sid], transcript_text)
             
             logger.info("Converting response to speech...")
             # Get audio data directly without saving to file
