@@ -392,6 +392,76 @@ async def health_check():
         "version": "1.0.0"
     }
 
+@fastapi_app.get("/conversation/{session_id}/memory")
+async def get_conversation_memory_stats(session_id: str):
+    """Get memory statistics for a conversation."""
+    try:
+        if session_id in conversation_states:
+            conversation = conversation_states[session_id]
+            return {
+                "memory_stats": conversation.get_memory_stats(),
+                "langchain_context": conversation.get_langchain_context() if hasattr(conversation, 'get_langchain_context') else None,
+                "basic_summary": conversation.get_conversation_summary()
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    except Exception as e:
+        logger.error(f"Error getting memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting memory stats: {str(e)}")
+
+@fastapi_app.get("/conversation/{session_id}/context")
+async def get_conversation_context(session_id: str):
+    """Get the full conversation context with LangChain enhancement."""
+    try:
+        if session_id in conversation_states:
+            conversation = conversation_states[session_id]
+            
+            # Get enhanced context if available
+            if hasattr(conversation, 'get_langchain_context'):
+                context = conversation.get_langchain_context()
+                using_langchain = conversation.use_langchain
+            else:
+                context = conversation.get_conversation_summary()
+                using_langchain = False
+            
+            return {
+                "conversation_id": session_id,
+                "context": context,
+                "using_langchain": using_langchain,
+                "persona": conversation.persona,
+                "message_count": len(conversation.conversation_history)
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    except Exception as e:
+        logger.error(f"Error getting conversation context: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting context: {str(e)}")
+
+@fastapi_app.get("/langchain-status")
+async def get_langchain_status():
+    """Check if LangChain is available and working."""
+    try:
+        # Import the module to check status
+        from services.ai_response import LANGCHAIN_AVAILABLE
+        
+        status = {
+            "langchain_available": LANGCHAIN_AVAILABLE,
+            "google_api_key_set": bool(os.getenv("GEMINI_API_KEY")),
+            "active_conversations": len(conversation_states)
+        }
+        
+        if LANGCHAIN_AVAILABLE:
+            # Count conversations using LangChain
+            langchain_conversations = sum(1 for conv in conversation_states.values() 
+                                        if hasattr(conv, 'use_langchain') and conv.use_langchain)
+            status["conversations_using_langchain"] = langchain_conversations
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Error checking LangChain status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error checking status: {str(e)}")
+
 @sio.event
 async def connect(sid, environ):
     logger.info(f"WebSocket connected: {sid}")
