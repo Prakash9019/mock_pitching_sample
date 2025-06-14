@@ -124,10 +124,20 @@ async def root():
       <div id="status">Click 'Start Meeting' to begin your pitch session</div>
       
       <div class="controls">
-        <button id="startBtn">🚀 Start Meeting</button>
-        <button id="recordBtn">🎙️ Record</button>
-        <button id="pauseBtn">⏸️ Pause & Send</button>
-        <button id="endBtn">🏁 End Session</button>
+        <div style="margin-bottom: 20px; text-align: center;">
+          <label for="personaSelect" style="margin-right: 10px; font-size: 16px;">Investor Type:</label>
+          <select id="personaSelect" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 16px;">
+            <option value="friendly">🤝 Friendly</option>
+            <option value="skeptical" selected>🤨 Skeptical</option>
+            <option value="technical">🔧 Technical</option>
+          </select>
+        </div>
+        <div>
+          <button id="startBtn">🚀 Start Meeting</button>
+          <button id="recordBtn">🎙️ Record</button>
+          <button id="pauseBtn">⏸️ Pause & Send</button>
+          <button id="endBtn">🏁 End Session</button>
+        </div>
       </div>
       
       <audio id="audioPlayer" controls></audio>
@@ -141,6 +151,7 @@ async def root():
         const endBtn = document.getElementById('endBtn');
         const audioPlayer = document.getElementById('audioPlayer');
         const statusElement = document.getElementById('status');
+        const personaSelect = document.getElementById('personaSelect');
         
         // Audio recording variables
         let mediaRecorder;
@@ -214,7 +225,10 @@ async def root():
                 updateStatus('Sending audio to AI...', 'info');
                 const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                 const arrayBuffer = await audioBlob.arrayBuffer();
-                socket.emit('audio_chunk', arrayBuffer);
+                socket.emit('audio_chunk', {
+                  audio: arrayBuffer,
+                  persona: personaSelect.value
+                });
                 audioChunks = [];
               } catch (error) {
                 console.error('Error processing audio:', error);
@@ -380,9 +394,18 @@ async def audio_chunk(sid, data):
     try:
         logger.info(f"Received audio chunk from {sid}")
         
+        # Extract audio data and persona from the incoming message
+        if isinstance(data, dict) and 'audio' in data:
+            audio_data = data['audio']
+            persona = data.get('persona', 'skeptical')  # Default to 'skeptical' if not provided
+        else:
+            # Backward compatibility with older clients
+            audio_data = data
+            persona = 'skeptical'
+        
         # Save the incoming audio to a temporary file for transcription
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_audio:
-            temp_audio.write(data)
+            temp_audio.write(audio_data)
             temp_audio_path = temp_audio.name
         
         try:
@@ -390,10 +413,11 @@ async def audio_chunk(sid, data):
             transcript = transcribe_audio(temp_audio_path)
             logger.info(f"Transcription complete: {transcript[:100]}...")
             
-            # Initialize conversation state if it doesn't exist
-            if sid not in conversation_states:
-                from services.ai_response import start_new_conversation
-                conversation_states[sid] = start_new_conversation(sid, "skeptical")
+            # Initialize conversation state if it doesn't exist or if persona has changed
+            from services.ai_response import start_new_conversation
+            if sid not in conversation_states or conversation_states[sid].persona != persona:
+                conversation_states[sid] = start_new_conversation(sid, persona)
+                logger.info(f"Started new conversation with {persona} persona")
             
             logger.info("Generating investor response...")
             investor_reply = generate_investor_response(conversation_states[sid], transcript)

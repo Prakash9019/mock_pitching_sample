@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mock-pitch-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - RELOAD=false
+      - LOG_LEVEL=info
+      # Add your API keys here or use a .env file
+      # - GEMINI_API_KEY=your_gemini_key
+      # - OPENAI_API_KEY=your_openai_key
+      # - ELEVENLABS_API_KEY=your_elevenlabs_key
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
