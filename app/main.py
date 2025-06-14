@@ -382,6 +382,16 @@ async def get_session(session_id: str):
         session_data = json.load(f)
     return session_data
 
+@fastapi_app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker healthcheck and load balancers."""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "AI Mock Investor Pitch",
+        "version": "1.0.0"
+    }
+
 @sio.event
 async def connect(sid, environ):
     logger.info(f"WebSocket connected: {sid}")
