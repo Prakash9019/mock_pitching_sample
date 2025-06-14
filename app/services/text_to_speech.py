@@ -1,83 +1,89 @@
+#text_to_speech.py
 import os
 import logging
+import json
 from typing import Optional
-import requests
+from google.oauth2 import service_account
+from google.cloud import texttospeech
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def convert_text_to_speech(text: str, output_path: str) -> str:
+def convert_text_to_speech(text: str, output_path: str = None) -> bytes:
     """
-    Convert text to speech using ElevenLabs or Google Cloud TTS.
+    Convert text to speech using Google Cloud Text-to-Speech API.
     
     Args:
         text: The text to convert to speech
-        output_path: The path where the audio file should be saved
+        output_path: Optional path to save the audio file. If None, file won't be saved.
         
     Returns:
-        The path to the generated audio file
+        The audio data as bytes in MP3 format
     """
-    logger.info(f"Converting text to speech, output to: {output_path}")
+    logger.info(f"Converting text to speech (text length: {len(text)} chars)")
     
     try:
-        # Option 1: Using ElevenLabs API
-        ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY")
-        VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Default voice ID
-        
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": ELEVEN_LABS_API_KEY
-        }
-        data = {
-            "text": text,
-            "model_id": "eleven_monolingual_v1",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.5
-            }
+        # Get credentials from environment variables
+        credentials_info = {
+            'type': os.getenv('TYPE'),
+            'project_id': os.getenv('PROJECT_ID'),
+            'private_key_id': os.getenv('PRIVATE_KEY_ID'),
+            'private_key': os.getenv('PRIVATE_KEY').replace('\\n', '\n'),
+            'client_email': os.getenv('CLIENT_EMAIL'),
+            'client_id': os.getenv('CLIENT_ID'),
+            'auth_uri': os.getenv('AUTH_URI'),
+            'token_uri': os.getenv('TOKEN_URI'),
+            'auth_provider_x509_cert_url': os.getenv('AUTH_PROVIDER_X509_CERT_URL'),
+            'client_x509_cert_url': os.getenv('CLIENT_X509_CERT_URL'),
+            'universe_domain': os.getenv('UNIVERSE_DOMAIN', 'googleapis.com')
         }
         
-        response = requests.post(url, json=data, headers=headers)
-        if response.status_code == 200:
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
+        # Create credentials object
+        credentials = service_account.Credentials.from_service_account_info(
+            credentials_info,
+            scopes=['https://www.googleapis.com/auth/cloud-platform']
+        )
         
-        # Option 2: Using Google Cloud Text-to-Speech
-        # from google.cloud import texttospeech
+        # Initialize the client with credentials
+        client = texttospeech.TextToSpeechClient(credentials=credentials)
+        # Set the text input to be synthesized
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+
+        # Build the voice request
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="en-US",
+            name="en-US-Studio-O",  # A high-quality voice
+            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE  # Using FEMALE as it's widely supported
+        )
+
+        # Select the type of audio file you want returned
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+        # Initialize the client            speaking_rate=1.0,  # Normal speed
+            pitch=0.0,  # Normal pitch
+            volume_gain_db=0.0  # No volume adjustment
+        )
+
+        # Perform the text-to-speech request
+        response = client.synthesize_speech(
+            input=synthesis_input,
+            voice=voice,
+            audio_config=audio_config
+        )
         
-        # client = texttospeech.TextToSpeechClient()
-        # synthesis_input = texttospeech.SynthesisInput(text=text)
+        # The response's audio_content is binary
+        audio_data = response.audio_content
         
-        # voice = texttospeech.VoiceSelectionParams(
-        #     language_code="en-US",
-        #     ssml_gender=texttospeech.SsmlVoiceGender.MALE,
-        # )
+        # Save to file if output_path is provided
+        if output_path:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'wb') as out:
+                out.write(audio_data)
+            logger.info(f"Saved audio to: {output_path}")
+            
+        return audio_data
         
-        # audio_config = texttospeech.AudioConfig(
-        #     audio_encoding=texttospeech.AudioEncoding.MP3
-        # )
-        
-        # response = client.synthesize_speech(
-        #     input=synthesis_input, voice=voice, audio_config=audio_config
-        # )
-        
-        # with open(output_path, "wb") as out:
-        #     out.write(response.audio_content)
-        
-        # For testing purposes, create a dummy audio file
-        # This should be replaced with actual TTS implementation in production
-        # with open(output_path, "wb") as f:
-        #     # Create a simple MP3 file (this is just a placeholder)
-        #     f.write(b'\xFF\xFB\x90\x44\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
-        
-        logger.info(f"Text-to-speech conversion successful, saved to: {output_path}")
-        return output_path
-    
     except Exception as e:
         logger.error(f"Error converting text to speech: {str(e)}")
-        # Create a dummy file for testing if conversion fails
-        with open(output_path, "wb") as f:
-            f.write(b'\xFF\xFB\x90\x44\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
-        return output_path
+        # Return empty bytes on error
+        return b''
