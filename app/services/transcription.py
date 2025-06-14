@@ -30,7 +30,7 @@ if not check_ffmpeg():
     sys.exit(1)
 
 try:
-    import whisper
+    
     from whisper import load_model
     WHISPER_AVAILABLE = True
 except ImportError:

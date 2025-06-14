@@ -59,41 +59,243 @@ async def root():
     <html lang="en">
     <head>
       <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>🎙️ AI Investor Pitch</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          max-width: 800px;
+          margin: 0 auto;
+          padding: 20px;
+          text-align: center;
+        }
+        .controls {
+          margin: 30px 0;
+        }
+        button {
+          padding: 12px 24px;
+          margin: 0 10px;
+          font-size: 16px;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: all 0.3s;
+        }
+        #startBtn {
+          background-color: #4CAF50;
+          color: white;
+        }
+        #recordBtn {
+          background-color: #f44336;
+          color: white;
+          display: none;
+        }
+        #pauseBtn {
+          background-color: #ff9800;
+          color: white;
+          display: none;
+        }
+        #endBtn {
+          background-color: #555555;
+          color: white;
+          display: none;
+        }
+        #status {
+          margin: 20px 0;
+          padding: 10px;
+          border-radius: 5px;
+          font-weight: bold;
+        }
+        .active {
+          opacity: 0.8;
+          transform: scale(0.95);
+        }
+        #audioPlayer {
+          width: 100%;
+          max-width: 500px;
+          margin: 20px auto;
+          display: block;
+        }
+      </style>
     </head>
     <body>
-      <h1>🎤 Talk to the AI Investor</h1>
-      <button id="record">🎙️ Record Pitch</button>
-      <audio id="player" controls></audio>
+      <h1>🎤 AI Investor Pitch Practice</h1>
+      
+      <div id="status">Click 'Start Meeting' to begin your pitch session</div>
+      
+      <div class="controls">
+        <button id="startBtn">🚀 Start Meeting</button>
+        <button id="recordBtn">🎙️ Record</button>
+        <button id="pauseBtn">⏸️ Pause & Send</button>
+        <button id="endBtn">🏁 End Session</button>
+      </div>
+      
+      <audio id="audioPlayer" controls></audio>
 
       <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
       <script>
-        const socket = io("http://localhost:8000");
-        const recordButton = document.getElementById("record");
-        const audioPlayer = document.getElementById("player");
+        // DOM Elements
+        const startBtn = document.getElementById('startBtn');
+        const recordBtn = document.getElementById('recordBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const endBtn = document.getElementById('endBtn');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const statusElement = document.getElementById('status');
+        
+        // Audio recording variables
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioStream;
+        let isRecording = false;
+        let socket;
 
-        recordButton.onclick = async () => {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          const mediaRecorder = new MediaRecorder(stream);
-          const chunks = [];
+        // Initialize socket connection
+        function initSocket() {
+          socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+          });
 
-          mediaRecorder.ondataavailable = e => chunks.push(e.data);
-          mediaRecorder.onstop = async () => {
-            const blob = new Blob(chunks, { type: 'audio/wav' });
-            const buffer = await blob.arrayBuffer();
-            socket.emit("audio_chunk", buffer);
-          };
+          socket.on('connect', () => {
+            console.log('Connected to server');
+            updateStatus('Connected. Ready to start the pitch session.', 'info');
+          });
 
-          mediaRecorder.start();
-          setTimeout(() => mediaRecorder.stop(), 4000);  // Record 4 seconds
-        };
+          socket.on('disconnect', () => {
+            updateStatus('Disconnected from server. Please refresh the page.', 'error');
+          });
 
-        socket.on("ai_response", (data) => {
-          const blob = new Blob([data], { type: "audio/mpeg" });
-          const url = URL.createObjectURL(blob);
-          audioPlayer.src = url;
-          audioPlayer.play();
+          socket.on('ai_response', (data) => {
+            try {
+              const blob = new Blob([data], { type: 'audio/mp3' });
+              const url = URL.createObjectURL(blob);
+              audioPlayer.src = url;
+              audioPlayer.play();
+              updateStatus('AI response received. Click "Record" to respond.', 'success');
+            } catch (error) {
+              console.error('Error playing AI response:', error);
+              updateStatus('Error playing AI response', 'error');
+            }
+          });
+        }
+
+        // Update status message
+        function updateStatus(message, type = 'info') {
+          statusElement.textContent = message;
+          statusElement.style.color = type === 'error' ? '#f44336' : 
+                                     type === 'success' ? '#4CAF50' : '#2196F3';
+        }
+
+        // Start Meeting
+        startBtn.addEventListener('click', async () => {
+          try {
+            updateStatus('Initializing meeting...', 'info');
+            initSocket();
+            
+            // Request microphone access
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Initialize media recorder
+            mediaRecorder = new MediaRecorder(audioStream);
+            mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0) {
+                audioChunks.push(event.data);
+              }
+            };
+            
+            mediaRecorder.onstop = async () => {
+              if (audioChunks.length === 0) {
+                updateStatus('No audio recorded. Please try again.', 'error');
+                return;
+              }
+              
+              try {
+                updateStatus('Sending audio to AI...', 'info');
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                socket.emit('audio_chunk', arrayBuffer);
+                audioChunks = [];
+              } catch (error) {
+                console.error('Error processing audio:', error);
+                updateStatus('Error processing audio', 'error');
+              }
+            };
+            
+            // Update UI
+            startBtn.style.display = 'none';
+            recordBtn.style.display = 'inline-block';
+            endBtn.style.display = 'inline-block';
+            updateStatus('Meeting started. Click "Record" to start speaking.', 'success');
+            
+          } catch (error) {
+            console.error('Error starting meeting:', error);
+            updateStatus(`Error: ${error.message}`, 'error');
+          }
         });
+
+        // Record Button
+        recordBtn.addEventListener('click', () => {
+          if (!isRecording) {
+            audioChunks = [];
+            mediaRecorder.start(100); // Collect data every 100ms
+            isRecording = true;
+            recordBtn.classList.add('active');
+            updateStatus('Recording... Click "Pause & Send" when done.', 'info');
+          }
+        });
+
+        // Pause & Send Button
+        pauseBtn.addEventListener('click', () => {
+          if (isRecording) {
+            mediaRecorder.stop();
+            isRecording = false;
+            recordBtn.classList.remove('active');
+            updateStatus('Processing your response...', 'info');
+          }
+        });
+
+        // Toggle between Record and Pause buttons
+        recordBtn.addEventListener('click', () => {
+          if (isRecording) {
+            pauseBtn.style.display = 'inline-block';
+            recordBtn.textContent = '🎙️ Recording...';
+          } else {
+            pauseBtn.style.display = 'none';
+            recordBtn.textContent = '🎙️ Record';
+          }
+        });
+
+        // End Session
+        endBtn.addEventListener('click', () => {
+          if (isRecording) {
+            mediaRecorder.stop();
+          }
+          
+          // Stop all tracks in the stream
+          if (audioStream) {
+            audioStream.getTracks().forEach(track => track.stop());
+          }
+          
+          // Reset UI
+          startBtn.style.display = 'inline-block';
+          recordBtn.style.display = 'none';
+          pauseBtn.style.display = 'none';
+          endBtn.style.display = 'none';
+          
+          updateStatus('Session ended. Click "Start Meeting" to begin a new session.', 'info');
+          
+          // Disconnect socket
+          if (socket) {
+            socket.disconnect();
+          }
+        });
+
+        // Check for browser support
+        if (!navigator.mediaDevices || !window.MediaRecorder) {
+          updateStatus('Your browser does not support audio recording. Please use Chrome, Firefox, or Edge.', 'error');
+          startBtn.disabled = true;
+        }
       </script>
     </body>
     </html>
@@ -170,6 +372,9 @@ async def get_session(session_id: str):
 async def connect(sid, environ):
     logger.info(f"WebSocket connected: {sid}")
 
+# Store conversation states
+conversation_states = {}
+
 @sio.event
 async def audio_chunk(sid, data):
     try:
@@ -185,12 +390,21 @@ async def audio_chunk(sid, data):
             transcript = transcribe_audio(temp_audio_path)
             logger.info(f"Transcription complete: {transcript[:100]}...")
             
+            # Initialize conversation state if it doesn't exist
+            if sid not in conversation_states:
+                from services.ai_response import start_new_conversation
+                conversation_states[sid] = start_new_conversation(sid, "skeptical")
+            
             logger.info("Generating investor response...")
-            investor_reply = generate_investor_response(transcript, persona="skeptical")
+            investor_reply = generate_investor_response(conversation_states[sid], transcript)
             
             logger.info("Converting response to speech...")
             # Get audio data directly without saving to file
             audio_data = convert_text_to_speech(investor_reply)
+            
+            if not audio_data:
+                raise ValueError("Failed to generate audio response")
+                
             logger.info(f"Generated {len(audio_data)} bytes of audio data")
             
             # Send the audio data directly to the client
@@ -199,12 +413,13 @@ async def audio_chunk(sid, data):
         finally:
             # Clean up the temporary file
             try:
-                os.unlink(temp_audio_path)
+                if os.path.exists(temp_audio_path):
+                    os.unlink(temp_audio_path)
             except Exception as e:
                 logger.warning(f"Failed to delete temporary file {temp_audio_path}: {e}")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await sio.emit("error", {"message": str(e)}, to=sid)
+        logger.error(f"WebSocket error: {str(e)}", exc_info=True)
+        await sio.emit("error", {"message": f"Error processing audio: {str(e)}"}, to=sid)
 
 
 @sio.event
