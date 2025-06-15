@@ -30,11 +30,29 @@ fastapi_app = FastAPI(
     version="1.0.0"
 )
 
-fastapi_app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Add CORS middleware to FastAPI app
+fastapi_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize Socket.IO server
-sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
-app = socketio.ASGIApp(sio, fastapi_app)
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    cors_allowed_origins="*",
+    logger=True,
+    engineio_logger=True
+)
+
+# Create ASGI app with Socket.IO and FastAPI
+app = socketio.ASGIApp(
+    socketio_server=sio,
+    other_asgi_app=fastapi_app,
+    socketio_path='socket.io'
+)
 
 # Get the base directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -605,22 +623,25 @@ async def audio_chunk(sid, data):
 async def disconnect(sid):
     logger.info(f"WebSocket disconnected: {sid}")
 
+# This block is only for direct execution with `python main.py`
 if __name__ == "__main__":
     import uvicorn
     import os
     
     # Get host and port from environment variables with defaults
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8080"))
     
     # Only enable reload in development
     reload = os.getenv("ENV", "production").lower() == "development"
     
     # Run the application
-    uvicorn.run("main:app", 
-                host=host, 
-                port=port, 
-                reload=reload,
-                workers=int(os.getenv("WEB_CONCURRENCY", "2")),
-                limit_concurrency=int(os.getenv("WEB_CONCURRENCY", "2")),
-                timeout_keep_alive=120)
+    uvicorn.run(
+        "main:app",  # Changed from "app.main:app" to "main:app" for direct execution
+        host=host, 
+        port=port, 
+        reload=reload,
+        workers=1,  # For development
+        log_level="debug",
+        timeout_keep_alive=120
+    )
