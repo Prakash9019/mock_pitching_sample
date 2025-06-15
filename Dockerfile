@@ -60,5 +60,5 @@
     EXPOSE 8080
     
     # Start the app using Uvicorn (ASGI for FastAPI + Socket.IO)
-    CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
     

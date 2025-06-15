@@ -14,9 +14,9 @@ import socketio
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import service modules
-from services.transcription import transcribe_audio
-from services.ai_response import generate_investor_response
-from services.text_to_speech import convert_text_to_speech
+from app.services.transcription import transcribe_audio
+from app.services.ai_response import generate_investor_response
+from app.services.text_to_speech import convert_text_to_speech
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -532,7 +532,7 @@ async def get_langchain_status():
     """Check if LangChain is available and working."""
     try:
         # Import the module to check status
-        from services.ai_response import LANGCHAIN_AVAILABLE
+        from app.services.ai_response import LANGCHAIN_AVAILABLE
         
         status = {
             "langchain_available": LANGCHAIN_AVAILABLE,
@@ -587,7 +587,7 @@ async def audio_chunk(sid, data):
             logger.info(f"Transcription complete (confidence: {confidence:.2f}): {transcript_text[:100]}...")
             
             # Initialize conversation state if it doesn't exist or if persona has changed
-            from services.ai_response import start_new_conversation
+            from app.services.ai_response import start_new_conversation
             if sid not in conversation_states or conversation_states[sid].persona != persona:
                 conversation_states[sid] = start_new_conversation(sid, persona)
                 logger.info(f"Started new conversation with {persona} persona")
