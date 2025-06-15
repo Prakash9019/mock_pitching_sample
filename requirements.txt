@@ -49,7 +49,7 @@ numba==0.61.2
 numpy==1.26.4
 soundfile==0.12.1
 librosa==0.10.2
-noisereduce==2.3.0
+noisereduce==3.0.3
 pydub==0.25.1
 webrtcvad==2.0.10
 openai-whisper==20240930
