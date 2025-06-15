@@ -55,16 +55,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Add non-free repository for some codecs
 RUN echo "deb http://deb.debian.org/debian bookworm non-free" >> /etc/apt/sources.list
 
-# Install system dependencies
-# Minimal set - start with these and add more if you get errors
+# Install system dependencies with additional debugging tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core audio/video
     ffmpeg \
     libsndfile1 \
     libasound2 \
+    # Math libraries
     libblas3 \
     liblapack3 \
+    # Debugging tools
+    procps \
+    lsof \
+    net-tools \
+    # Clean up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Create a debug script
+RUN echo '#!/bin/bash\n\
+echo "=== Environment Variables ==="\nenv | sort\necho "\n=== Current Directory ==="\npwd\nls -la\necho "\n=== Python Version ==="\npython --version\necho "\n=== Pip List ==="\npip list\necho "\n=== Check App Directory ==="\nls -la /app\n' > /debug.sh \
+    && chmod +x /debug.sh
 
 # Set working directory
 WORKDIR /app
@@ -91,5 +102,21 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl --fail http://localhost:8080/health || exit 1
 
-# Command to run the application with Gunicorn
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "120"]
+# Print debug information before starting
+RUN /debug.sh
+
+# Command to run the application with Gunicorn with better error logging
+CMD ["sh", "-c", "\
+    echo '=== Starting Application ===' && \
+    /debug.sh && \
+    echo '=== Starting Gunicorn ===' && \
+    exec gunicorn app.main:app \
+        -k uvicorn.workers.UvicornWorker \
+        --bind 0.0.0.0:8080 \
+        --workers 2 \
+        --timeout 120 \
+        --log-level debug \
+        --error-logfile - \
+        --access-logfile - \
+        --capture-output \
+        --enable-stdio-inheritance"]
