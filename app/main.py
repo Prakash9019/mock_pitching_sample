@@ -607,4 +607,20 @@ async def disconnect(sid):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    import os
+    
+    # Get host and port from environment variables with defaults
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8080"))
+    
+    # Only enable reload in development
+    reload = os.getenv("ENV", "production").lower() == "development"
+    
+    # Run the application
+    uvicorn.run("main:app", 
+                host=host, 
+                port=port, 
+                reload=reload,
+                workers=int(os.getenv("WEB_CONCURRENCY", "2")),
+                limit_concurrency=int(os.getenv("WEB_CONCURRENCY", "2")),
+                timeout_keep_alive=120)
