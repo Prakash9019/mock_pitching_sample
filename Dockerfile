@@ -19,6 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # For some Python packages that need system libraries
     libblas-dev \
     liblapack-dev \
+    # For librosa
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libavfilter-dev \
+    # For numba
+    llvm-dev \
+    # For opencv-python
+    libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install requirements
@@ -39,12 +49,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
     PYTHONFAULTHANDLER=1 \
     PYTHONHASHSEED=random \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Audio/video processing
     ffmpeg \
     libsndfile1 \
+    libavcodec60 \
+    libavformat60 \
+    libavutil58 \
+    libswresample4 \
+    libavfilter8 \
+    # For librosa
+    libblas3 \
+    liblapack3 \
+    # For opencv-python
+    libgl1-mesa-glx \
+    # For webrtcvad
+    libasound2 \
+    # Clean up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -59,11 +84,12 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy application code
 COPY . .
-# Copy the rest of the application
-COPY ./app ./app
 
 # Create necessary directories
 RUN mkdir -p /app/data/uploads /app/data/responses /app/data/sessions /app/logs
+
+# Set proper permissions
+RUN chmod -R a+rwx /app/data
 
 # Expose the port the app runs on
 EXPOSE 8080
@@ -73,4 +99,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl --fail http://localhost:8080/health || exit 1
 
 # Command to run the application with Gunicorn
-CMD ["uvicorn", "h.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "120"]
