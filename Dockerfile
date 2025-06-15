@@ -52,27 +52,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     DEBIAN_FRONTEND=noninteractive
 
+# Add non-free repository for some codecs
+RUN echo "deb http://deb.debian.org/debian bookworm non-free" >> /etc/apt/sources.list
+
 # Install system dependencies
+# Minimal set - start with these and add more if you get errors
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Audio/video processing
     ffmpeg \
     libsndfile1 \
-    libavcodec-extra \
-    libavcodec-extra58 \
-    libavformat58 \
-    libavutil56 \
-    libswresample3 \
-    libavfilter7 \
-    # For librosa
+    libasound2 \
     libblas3 \
     liblapack3 \
-    # For opencv-python
-    libgl1-mesa-glx \
-    # For webrtcvad
-    libasound2 \
-    # Additional codecs
-    libx264-dev \
-    # Clean up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
