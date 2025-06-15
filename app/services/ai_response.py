@@ -249,23 +249,36 @@ class ConversationState:
             context = self.get_langchain_context()
             
             # Create enhanced prompt with LangChain
+            system_prompt = f"""You are an experienced investor having a natural conversation with a startup founder. Your goal is to understand their business while making them feel comfortable and engaged.
+
+Your persona: {persona['persona']}
+Your style: {persona['style']}
+
+KEY INSTRUCTIONS:
+1. First, acknowledge or react to what the founder just said in a natural way (1 sentence)
+2. Then ask ONE insightful follow-up question that builds on their last response
+3. Keep it conversational - imagine you're having a friendly chat, not conducting an interview
+4. If the founder mentions numbers (revenue, users, growth), ask a relevant follow-up about it
+5. If you learn the founder's name, use it naturally in your responses
+6. Vary your responses - don't use the same phrases repeatedly
+7. Keep your total response under 3 sentences
+
+Example responses:
+- "That's impressive growth! What's driving most of that increase?"
+- "I see you mentioned [topic]. Could you elaborate on how that works?"
+- "Thanks for sharing that, [Name]. What's been your biggest challenge with [specific aspect]?"
+
+Remember: Sound like a human, not a robot. Be curious and engaged."""
+
+            human_prompt = f"""Here's our conversation so far:
+
+{context}
+
+Based on the most recent messages, craft a natural response that shows you're listening and asks a relevant follow-up question. Keep it conversational and under 3 sentences total."""
+
             prompt = ChatPromptTemplate.from_messages([
-                ("system", f"""You are an investor having a conversation with a startup founder.
-                
-                Your investor persona: {persona['persona']}
-                Your questioning style: {persona['style']}
-                
-                Instructions:
-                1. Review the entire conversation history to understand what has been discussed
-                2. Ask ONE insightful follow-up question that builds on previous exchanges
-                3. Show that you've been actively listening and understanding their responses
-                4. Focus on uncovering important business details they haven't fully explained
-                5. Keep your question concise (1-2 sentences maximum)
-                6. Be natural and conversational, not robotic
-                
-                The conversation context includes both recent messages and summaries of earlier exchanges.
-                Use this full context to ask a thoughtful, relevant question."""),
-                ("human", f"Conversation so far:\n{context}\n\nBased on this conversation history, what's your next insightful question?")
+                ("system", system_prompt),
+                ("human", human_prompt)
             ])
             
             # Generate response using LangChain
@@ -298,22 +311,25 @@ class ConversationState:
             context = self.get_conversation_summary()
             
             # Prepare prompt for the AI
-            prompt = f"""You are an investor having a conversation with a startup founder. 
-            Your persona: {persona['persona']}
-            Your style: {persona['style']}
-            
-            Here's our conversation so far:
-            {context}
-            
-            Based on this, ask ONE insightful, specific question that:
-            1. Shows you've been listening to their previous answers
-            2. Digs deeper into an important aspect they mentioned
-            3. Helps you understand their business better
-            4. Is natural and conversational
-            
-            Keep your question concise (1-2 sentences max).
-            
-            Your question:"""
+            prompt = f"""You're an investor having a natural conversation with a startup founder. 
+
+Your persona: {persona['persona']}
+Your style: {persona['style']}
+
+Here's our conversation so far:
+{context}
+
+Your task:
+1. First, acknowledge or react to what the founder just said (1 sentence)
+2. Then ask ONE natural follow-up question that shows you were listening
+3. Keep it conversational and under 3 sentences total
+
+Example responses:
+- "That's interesting! How did you come up with that approach?"
+- "I see you mentioned [topic]. What's been your experience with that?"
+- "Thanks for sharing. What's next for your company?"
+
+Your response (be natural and engaging):"""
             
             # Use Gemini to generate a thoughtful follow-up question
             model = genai.GenerativeModel('gemini-1.5-flash')
@@ -329,19 +345,19 @@ class ConversationState:
                 return self._get_fallback_question()
                 
             return question
-            
+                
         except Exception as e:
-            logger.error(f"Error generating basic question: {str(e)}")
+            logger.error(f"Error generating question with Gemini: {str(e)}")
             return self._get_fallback_question()
     
     def _get_fallback_question(self) -> str:
         """Get a fallback question when generation fails."""
         fallbacks = [
-            "That's interesting. Could you elaborate on that?",
-            "I'd love to hear more about that aspect.",
-            "What inspired you to take that approach?",
-            "How does that compare to other solutions in the market?",
-            "Could you walk me through that in more detail?"
+            "That's interesting—could you tell me more about that?",
+            "I'm curious, what led you to that approach?",
+            "Thanks for sharing. What's been the most surprising part of this journey for you?",
+            "What's the story behind that?",
+            "How did you first get started with this?"
         ]
         import random
         return random.choice(fallbacks)

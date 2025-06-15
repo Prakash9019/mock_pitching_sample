@@ -629,7 +629,7 @@ if __name__ == "__main__":
     import os
     
     # Get host and port from environment variables with defaults
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8080"))
     
     # Only enable reload in development
@@ -640,7 +640,7 @@ if __name__ == "__main__":
         "main:app",  # Changed from "app.main:app" to "main:app" for direct execution
         host=host, 
         port=port, 
-        reload=reload,
+        # reload=reload,
         workers=1,  # For development
         log_level="debug",
         timeout_keep_alive=120
