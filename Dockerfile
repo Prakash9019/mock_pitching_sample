@@ -57,11 +57,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Audio/video processing
     ffmpeg \
     libsndfile1 \
-    libavcodec60 \
-    libavformat60 \
-    libavutil58 \
-    libswresample4 \
-    libavfilter8 \
+    libavcodec-extra \
+    libavcodec-extra58 \
+    libavformat58 \
+    libavutil56 \
+    libswresample3 \
+    libavfilter7 \
     # For librosa
     libblas3 \
     liblapack3 \
@@ -69,6 +70,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     # For webrtcvad
     libasound2 \
+    # Additional codecs
+    libx264-dev \
     # Clean up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
