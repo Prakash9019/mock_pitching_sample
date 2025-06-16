@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import os
 import json
 import uuid
@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Import service modules
 from app.services.transcription import transcribe_audio
-from app.services.ai_response import generate_investor_response
-from app.services.text_to_speech import convert_text_to_speech
+from app.services.intelligent_ai_agent import get_conversation_statistics
+from app.services.enhanced_text_to_speech import convert_text_to_speech_with_persona
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -121,9 +121,18 @@ async def root():
           color: white;
         }
         #recordBtn {
-          background-color: #f44336;
+          background-color: #4CAF50;
           color: white;
           display: none;
+        }
+        #recordBtn.active {
+          background-color: #f44336;
+          animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+          0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7); }
+          70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
         }
         #pauseBtn {
           background-color: #ff9800;
@@ -156,7 +165,38 @@ async def root():
     <body>
       <h1>🎤 AI Investor Pitch Practice</h1>
       
-      <div id="status">Click 'Start Meeting' to begin your pitch session</div>
+      <div id="status">Click 'Start Meeting' to begin your pitch session with real-time speech recognition</div>
+      
+      <div id="conversationProgress" style="
+        display: none;
+        margin: 15px 0;
+        padding: 15px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+      ">
+        <div id="progressInfo" style="margin-bottom: 10px;">
+          <strong id="investorName">Investor:</strong> <span id="currentStage">Getting started...</span>
+        </div>
+        <div id="progressBar" style="
+          width: 100%;
+          height: 8px;
+          background-color: rgba(255,255,255,0.3);
+          border-radius: 4px;
+          overflow: hidden;
+        ">
+          <div id="progressFill" style="
+            width: 0%;
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.5s ease;
+          "></div>
+        </div>
+        <div id="stageCounter" style="margin-top: 8px; font-size: 12px; opacity: 0.9;">
+          Stage 1 of 12
+        </div>
+      </div>
       
       <div class="controls">
         <div style="margin-bottom: 20px; text-align: center;">
@@ -169,13 +209,28 @@ async def root():
         </div>
         <div>
           <button id="startBtn">🚀 Start Meeting</button>
-          <button id="recordBtn" style="display: none;">🎙️ Record</button>
-          <button id="pauseBtn" style="display: none;">⏸️ Pause</button>
+          <button id="recordBtn" style="display: none;">🎙️ Start Speaking</button>
+          <button id="pauseBtn" style="display: none;">⏸️ Pause & Send</button>
           <button id="endBtn" style="display: none;">⏹️ End Meeting</button>
           <div id="audio-level-container" style="display: none;">
             <div id="audio-level"></div>
           </div>
         </div>
+      </div>
+      
+      <div id="transcriptDisplay" style="
+        margin: 20px 0;
+        padding: 15px;
+        border: 2px dashed #ccc;
+        border-radius: 10px;
+        min-height: 100px;
+        background-color: #f9f9f9;
+        font-style: italic;
+        color: #666;
+        display: none;
+        text-align: left;
+      ">
+        Your speech will appear here in real-time...
       </div>
       
       <audio id="audioPlayer" controls></audio>
@@ -190,13 +245,39 @@ async def root():
         const audioPlayer = document.getElementById('audioPlayer');
         const statusElement = document.getElementById('status');
         const personaSelect = document.getElementById('personaSelect');
+        const transcriptDisplay = document.getElementById('transcriptDisplay');
+        const conversationProgress = document.getElementById('conversationProgress');
+        const investorName = document.getElementById('investorName');
+        const currentStage = document.getElementById('currentStage');
+        const progressFill = document.getElementById('progressFill');
+        const stageCounter = document.getElementById('stageCounter');
         
-        // Audio recording variables
-        let mediaRecorder;
-        let audioChunks = [];
+        // Speech recognition variables
+        let recognition;
+        let isListening = false;
+        let currentTranscript = '';
+        let interimTranscript = '';
         let audioStream;
-        let isRecording = false;
         let socket;
+        
+        // Investor persona information
+        const investorPersonas = {
+          'skeptical': {
+            name: 'Sarah Martinez',
+            title: 'Senior Partner at Venture Capital',
+            description: 'Analytical and thorough investor who asks tough questions'
+          },
+          'technical': {
+            name: 'Dr. Alex Chen', 
+            title: 'CTO-turned-Investor at TechVentures',
+            description: 'Tech-focused investor interested in deep technical details'
+          },
+          'friendly': {
+            name: 'Michael Thompson',
+            title: 'Angel Investor & Former Entrepreneur',
+            description: 'Supportive investor focused on founder journey'
+          }
+        };
 
         // Initialize socket connection
         function initSocket() {
@@ -221,7 +302,15 @@ async def root():
               const url = URL.createObjectURL(blob);
               audioPlayer.src = url;
               audioPlayer.play();
-              updateStatus('AI response received. Click "Record" to respond.', 'success');
+              updateStatus('AI response received. Click "Start Speaking" to respond.', 'success');
+              
+              // Hide the transcript display after receiving response
+              setTimeout(() => {
+                transcriptDisplay.style.display = 'none';
+              }, 2000);
+              
+              // Update conversation progress
+              updateConversationProgress(personaSelect.value);
             } catch (error) {
               console.error('Error playing AI response:', error);
               updateStatus('Error playing AI response', 'error');
@@ -235,6 +324,30 @@ async def root():
           statusElement.style.color = type === 'error' ? '#f44336' : 
                                      type === 'success' ? '#4CAF50' : '#2196F3';
         }
+        
+        // Update conversation progress
+        function updateConversationProgress(persona) {
+          const personaInfo = investorPersonas[persona];
+          if (personaInfo) {
+            investorName.textContent = `${personaInfo.name} - ${personaInfo.title}`;
+            conversationProgress.style.display = 'block';
+            
+            // Fetch and update conversation stats
+            if (socket && socket.id) {
+              fetch(`/api/conversation/${socket.id}/stats`)
+                .then(response => response.json())
+                .then(stats => {
+                  if (stats.topics_covered) {
+                    const currentTopic = stats.topics_covered[stats.topics_covered.length - 1] || 'getting_started';
+                    currentStage.textContent = currentTopic.replace('_', ' ').toUpperCase();
+                    progressFill.style.width = stats.progress_percentage + '%';
+                    stageCounter.textContent = `${stats.topics_covered.length} of 8 topics covered`;
+                  }
+                })
+                .catch(error => console.log('Stats not available yet'));
+            }
+          }
+        }
 
         // Start Meeting
         startBtn.addEventListener('click', async () => {
@@ -242,68 +355,89 @@ async def root():
             updateStatus('Initializing meeting...', 'info');
             initSocket();
             
-            // Audio constraints for better quality
-            const audioConstraints = {
-              audio: {
-                channelCount: 1,  // Mono audio is sufficient for speech
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                sampleRate: 16000,  // 16kHz sample rate is good for speech
-                sampleSize: 16,     // 16-bit samples
-                mimeType: 'audio/webm;codecs=opus'  // Use Opus codec for better quality
-              },
-              video: false
-            };
-
-            // MediaRecorder options
-            const recorderOptions = {
-              mimeType: 'audio/webm;codecs=opus',
-              audioBitsPerSecond: 128000  // 128kbps for good quality
-            };
-
-            // Request microphone access with better settings
-            audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+            // Check for speech recognition support
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+              throw new Error('Speech recognition not supported in this browser. Please use Chrome, Edge, or Safari.');
+            }
             
-            // Setup audio level monitoring
-            setupAudioMeter(audioStream);
+            // Initialize speech recognition
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
             
-            // Initialize media recorder with better settings
-            mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+            // Configure speech recognition
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
             
-            // Handle data available event
-            mediaRecorder.ondataavailable = (event) => {
-              if (event.data.size > 0) {
-                audioChunks.push(event.data);
-              }
-            };
-            
-            mediaRecorder.onstop = async () => {
-              if (audioChunks.length === 0) {
-                updateStatus('No audio recorded. Please try again.', 'error');
-                return;
+            // Handle speech recognition results
+            recognition.onresult = (event) => {
+              let finalTranscript = '';
+              let interimTranscript = '';
+              
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                  finalTranscript += transcript + ' ';
+                } else {
+                  interimTranscript += transcript;
+                }
               }
               
-              try {
-                updateStatus('Sending audio to AI...', 'info');
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const arrayBuffer = await audioBlob.arrayBuffer();
-                socket.emit('audio_chunk', {
-                  audio: arrayBuffer,
-                  persona: personaSelect.value
-                });
-                audioChunks = [];
-              } catch (error) {
-                console.error('Error processing audio:', error);
-                updateStatus('Error processing audio', 'error');
+              if (finalTranscript) {
+                currentTranscript += finalTranscript;
+              }
+              
+              // Update transcript display with both final and interim results
+              const displayText = currentTranscript + interimTranscript;
+              if (displayText.trim()) {
+                transcriptDisplay.innerHTML = `<strong>Your speech:</strong><br>"${displayText}"`;
+                transcriptDisplay.style.color = '#333';
+                transcriptDisplay.style.fontStyle = 'normal';
+              }
+              
+              // Update status
+              if (interimTranscript) {
+                updateStatus('Listening... Keep speaking.', 'info');
+              } else if (finalTranscript) {
+                updateStatus('Listening... Speech captured.', 'info');
               }
             };
+            
+            recognition.onerror = (event) => {
+              console.error('Speech recognition error:', event.error);
+              updateStatus(`Speech recognition error: ${event.error}`, 'error');
+            };
+            
+            recognition.onend = () => {
+              if (isListening) {
+                // Restart recognition if we're still supposed to be listening
+                try {
+                  recognition.start();
+                } catch (error) {
+                  console.error('Error restarting recognition:', error);
+                }
+              }
+            };
+            
+            // Request microphone access for audio level monitoring
+            try {
+              audioStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: { echoCancellation: true, noiseSuppression: true } 
+              });
+              setupAudioMeter(audioStream);
+            } catch (error) {
+              console.warn('Could not access microphone for audio level monitoring:', error);
+            }
             
             // Update UI
             startBtn.style.display = 'none';
             recordBtn.style.display = 'inline-block';
             endBtn.style.display = 'inline-block';
-            updateStatus('Meeting started. Click "Record" to start speaking.', 'success');
+            updateStatus('Meeting started. Click "Start Speaking" to begin real-time speech recognition.', 'success');
+            
+            // Show conversation progress
+            updateConversationProgress(personaSelect.value);
             
           } catch (error) {
             console.error('Error starting meeting:', error);
@@ -311,42 +445,62 @@ async def root():
           }
         });
 
-        // Record Button
+        // Start Speaking Button
         recordBtn.addEventListener('click', () => {
-          if (!isRecording) {
-            audioChunks = [];
-            mediaRecorder.start(100); // Collect data every 100ms
-            isRecording = true;
-            recordBtn.classList.add('active');
-            updateStatus('Recording... Click "Pause & Send" when done.', 'info');
+          if (!isListening) {
+            // Start speech recognition
+            try {
+              currentTranscript = ''; // Reset transcript
+              transcriptDisplay.style.display = 'block';
+              transcriptDisplay.innerHTML = 'Listening... Start speaking now.';
+              transcriptDisplay.style.color = '#666';
+              transcriptDisplay.style.fontStyle = 'italic';
+              
+              recognition.start();
+              isListening = true;
+              recordBtn.classList.add('active');
+              recordBtn.textContent = '🎙️ Listening...';
+              pauseBtn.style.display = 'inline-block';
+              document.getElementById('audio-level-container').style.display = 'block';
+              updateStatus('Listening... Start speaking now.', 'info');
+            } catch (error) {
+              console.error('Error starting speech recognition:', error);
+              updateStatus('Error starting speech recognition', 'error');
+            }
           }
         });
 
         // Pause & Send Button
         pauseBtn.addEventListener('click', () => {
-          if (isRecording) {
-            mediaRecorder.stop();
-            isRecording = false;
+          if (isListening) {
+            // Stop speech recognition and send the transcript
+            recognition.stop();
+            isListening = false;
             recordBtn.classList.remove('active');
-            updateStatus('Processing your response...', 'info');
-          }
-        });
-
-        // Toggle between Record and Pause buttons
-        recordBtn.addEventListener('click', () => {
-          if (isRecording) {
-            pauseBtn.style.display = 'inline-block';
-            recordBtn.textContent = '🎙️ Recording...';
-          } else {
+            recordBtn.textContent = '🎙️ Start Speaking';
             pauseBtn.style.display = 'none';
-            recordBtn.textContent = '🎙️ Record';
+            document.getElementById('audio-level-container').style.display = 'none';
+            
+            if (currentTranscript.trim()) {
+              transcriptDisplay.innerHTML = `<strong>Sent:</strong><br>"${currentTranscript.trim()}"`;
+              transcriptDisplay.style.color = '#2196F3';
+              updateStatus('Sending your message to AI...', 'info');
+              socket.emit('text_message', {
+                text: currentTranscript.trim(),
+                persona: personaSelect.value
+              });
+            } else {
+              transcriptDisplay.style.display = 'none';
+              updateStatus('No speech detected. Please try again.', 'error');
+            }
           }
         });
 
         // End Session
         endBtn.addEventListener('click', () => {
-          if (isRecording) {
-            mediaRecorder.stop();
+          if (isListening) {
+            recognition.stop();
+            isListening = false;
           }
           
           // Stop all tracks in the stream
@@ -359,6 +513,10 @@ async def root():
           recordBtn.style.display = 'none';
           pauseBtn.style.display = 'none';
           endBtn.style.display = 'none';
+          recordBtn.textContent = '🎙️ Start Speaking';
+          document.getElementById('audio-level-container').style.display = 'none';
+          transcriptDisplay.style.display = 'none';
+          conversationProgress.style.display = 'none';
           
           updateStatus('Session ended. Click "Start Meeting" to begin a new session.', 'info');
           
@@ -422,7 +580,10 @@ async def process_pitch(
             shutil.copyfileobj(audio_file.file, buffer)
 
         transcript = transcribe_audio(upload_path)
-        investor_response = generate_investor_response(transcript, investor_persona)
+        # Use the global ai_agent to generate a response
+        if ai_agent is None:
+            raise HTTPException(status_code=500, detail="AI Agent not initialized")
+        investor_response = ai_agent.generate_response(str(uuid.uuid4()), transcript)
         response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_response.mp3")
         convert_text_to_speech(investor_response, response_audio_path)
 
@@ -532,15 +693,15 @@ async def get_langchain_status():
     """Check if LangChain is available and working."""
     try:
         # Import the module to check status
-        from app.services.ai_response import LANGCHAIN_AVAILABLE
+        # Legacy code - LangChain integration is now handled in the intelligent agent
         
         status = {
-            "langchain_available": LANGCHAIN_AVAILABLE,
+            "langchain_available": True,  # Now handled by intelligent agent
             "google_api_key_set": bool(os.getenv("GEMINI_API_KEY")),
             "active_conversations": len(conversation_states)
         }
         
-        if LANGCHAIN_AVAILABLE:
+        if True:  # Enhanced AI agent is always available
             # Count conversations using LangChain
             langchain_conversations = sum(1 for conv in conversation_states.values() 
                                         if hasattr(conv, 'use_langchain') and conv.use_langchain)
@@ -552,17 +713,331 @@ async def get_langchain_status():
         logger.error(f"Error checking LangChain status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error checking status: {str(e)}")
 
+@fastapi_app.get("/api/conversation/{conversation_id}/stats")
+async def get_conversation_stats(conversation_id: str):
+    """Get statistics for a specific conversation.
+    
+    Args:
+        conversation_id: The ID of the conversation to get stats for
+        
+    Returns:
+        dict: Conversation statistics or error details
+        
+    Raises:
+        HTTPException: With appropriate status code and error details
+    """
+    global ai_agent
+    
+    try:
+        if not conversation_id:
+            logger.warning("Empty conversation_id provided")
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "error": "conversation_id is required", 
+                    "status": "error",
+                    "message": "Please provide a valid conversation ID"
+                }
+            )
+            
+        if ai_agent is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "Service Unavailable",
+                    "status": "error",
+                    "message": "AI Agent is not initialized. Please try again later."
+                }
+            )
+            
+        # Get conversation statistics directly from the agent
+        try:
+            stats = ai_agent.get_conversation_stats(conversation_id)
+            logger.debug(f"Conversation stats response: {stats}")
+            
+            # Handle different status responses
+            status = stats.get("status", "active")
+            
+            if status == "active":
+                return {
+                    "status": "success",
+                    "data": {
+                        "conversation_id": conversation_id,
+                        "current_stage": stats.get("current_stage"),
+                        "stages_completed": stats.get("stages_completed", []),
+                        "next_stage": stats.get("next_stage"),
+                        "messages_exchanged": stats.get("messages_exchanged", 0),
+                        "last_activity": stats.get("last_activity")
+                    }
+                }
+            else:
+                # Handle other statuses
+                return {
+                    "status": "success",
+                    "data": stats
+                }
+                
+        except KeyError:
+            # Handle case where conversation doesn't exist
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "Conversation not found",
+                    "status": "not_found",
+                    "message": f"No conversation found with ID: {conversation_id}"
+                }
+            )
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions as is
+        raise
+        
+    except Exception as e:
+        logger.error(f"Unexpected error getting conversation stats: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Internal server error",
+                "status": "error",
+                "type": type(e).__name__,
+                "message": str(e)
+            }
+        )
+
+# Global instance of the AI agent
+ai_agent = None
+
+@fastapi_app.on_event("startup")
+async def startup_event():
+    """Initialize the AI agent when the application starts"""
+    global ai_agent
+    try:
+        from app.services.intelligent_ai_agent import IntelligentAIAgent
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        
+        # Initialize the LLM
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-pro",
+            temperature=0.7,
+            google_api_key=os.getenv("GEMINI_API_KEY")
+        )
+        
+        # Initialize the AI agent
+        ai_agent = IntelligentAIAgent(llm)
+        logger.info("AI Agent initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize AI agent: {str(e)}", exc_info=True)
+        raise
+
+@fastapi_app.post("/api/conversation/start")
+async def start_conversation(persona: str = "friendly"):
+    """Start a new conversation with the AI investor
+    
+    Args:
+        persona: The investor persona to use (e.g., 'skeptical', 'friendly', 'technical')
+        
+    Returns:
+        dict: Conversation details including the conversation_id and initial greeting
+    """
+    try:
+        if ai_agent is None:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "AI Agent not initialized",
+                    "status": "error"
+                }
+            )
+            
+        # Create a new conversation ID
+        conversation_id = str(uuid.uuid4())
+        
+        # Start a new conversation with the AI agent
+        context = ai_agent.start_conversation(conversation_id, persona)
+        
+        # The initial greeting is already added to the chat history
+        initial_greeting = context.chat_history[-1].replace("Investor: ", "")
+        
+        logger.info(f"Started new conversation: {conversation_id} with persona: {persona}")
+        
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "persona": persona,
+            "initial_greeting": initial_greeting,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting conversation: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to start conversation",
+                "details": str(e),
+                "status": "error"
+            }
+        )
+
+@fastapi_app.get("/api/tts/voices")
+async def get_tts_voices():
+    """Get available TTS voices for all personas"""
+    try:
+        from app.services.enhanced_text_to_speech import list_available_voices
+        return list_available_voices()
+    except Exception as e:
+        logger.error(f"Error getting TTS voices: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get TTS voices")
+
+@fastapi_app.get("/api/tts/test/{persona}")
+async def test_persona_voice(persona: str):
+    """Test a specific persona voice"""
+    try:
+        from app.services.enhanced_text_to_speech import test_all_personas, get_persona_voice_info
+        
+        if persona not in ["skeptical", "technical", "friendly"]:
+            raise HTTPException(status_code=400, detail="Invalid persona. Choose from: skeptical, technical, friendly")
+        
+        # Get voice info
+        voice_info = get_persona_voice_info(persona)
+        
+        # Test the voice
+        test_results = test_all_personas()
+        
+        return {
+            "persona": persona,
+            "voice_info": voice_info,
+            "test_result": test_results.get(persona, False),
+            "message": f"Voice test for {persona} persona completed"
+        }
+    except Exception as e:
+        logger.error(f"Error testing persona voice: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to test persona voice")
+
+@fastapi_app.get("/api/debug/conversations")
+async def debug_conversations():
+    """Debug: Show all active conversations"""
+    try:
+        debug_info = {}
+        for conv_id, context in conversation_states.items():
+            if hasattr(context, 'conversation_history'):
+                debug_info[conv_id] = {
+                    "persona": context.persona,
+                    "founder_name": getattr(context, 'founder_name', None),
+                    "company_name": getattr(context, 'company_name', None),
+                    "topics_covered": getattr(context, 'covered_topics', []),
+                    "message_count": len(context.conversation_history),
+                    "last_activity": str(context.last_activity)
+                }
+        return {"active_conversations": debug_info}
+    except Exception as e:
+        logger.error(f"Error getting debug info: {str(e)}")
+        return {"error": str(e)}
+
 @sio.event
 async def connect(sid, environ):
     logger.info(f"WebSocket connected: {sid}")
 
-# Store conversation states
-conversation_states = {}
+@sio.event
+async def text_message(sid, data):
+    """Handle real-time transcribed text messages"""
+    try:
+        global ai_agent
+        
+        if ai_agent is None:
+            logger.error("AI Agent not initialized")
+            await sio.emit("error", {"message": "AI Agent not initialized"}, to=sid)
+            return
+            
+        logger.info(f"Received text message from {sid}")
+        
+        # Extract text and persona from the incoming message
+        if isinstance(data, dict):
+            transcript_text = data.get('text', '')
+            persona = data.get('persona', 'skeptical')
+        else:
+            # Backward compatibility
+            transcript_text = str(data)
+            persona = 'skeptical'
+        
+        if not transcript_text.strip():
+            logger.warning("Received empty text message")
+            return
+            
+        logger.info(f"Processing text: {transcript_text[:100]}...")
+        
+        # Generate response using the AI agent
+        try:
+            # First, check if we have a conversation, start one if not
+            try:
+                # Check if this is the first message in a new conversation
+                is_new_conversation = False
+                try:
+                    # This will raise ValueError if conversation doesn't exist
+                    ai_agent.conversations[sid]
+                except (KeyError, ValueError):
+                    # Start a new conversation
+                    logger.info(f"Starting new conversation for {sid} with {persona} persona")
+                    await sio.emit("status", {"message": "Starting new conversation..."}, to=sid)
+                    ai_agent.start_conversation(sid, persona)
+                    is_new_conversation = True
+                
+                # Process the user's message
+                investor_reply = ai_agent.generate_response(sid, transcript_text)
+                
+                # If this was the first message, use a more contextual greeting
+                if is_new_conversation:
+                    # If the user introduced themselves, respond accordingly
+                    if any(word in transcript_text.lower() for word in ["i am", "i'm", "my name is"]):
+                        # The AI will naturally respond to the introduction in generate_response
+                        pass
+                    else:
+                        # Default greeting for new conversations
+                        investor_reply = f"Hello! I'm your AI investor. {investor_reply}"
+                
+            except ValueError as ve:
+                # Re-raise any unexpected ValueErrors
+                logger.error(f"Error in conversation handling: {str(ve)}")
+                raise
+            
+            logger.info("Converting response to speech with persona-specific voice...")
+            # Get audio data directly without saving to file using persona-specific voice
+            audio_data = convert_text_to_speech_with_persona(investor_reply, persona)
+            
+            if not audio_data:
+                raise ValueError("Failed to generate audio response")
+                
+            logger.info(f"Generated {len(audio_data)} bytes of audio data")
+            
+            # Send the audio data directly to the client
+            await sio.emit("ai_response", audio_data, to=sid)
+            
+        except Exception as e:
+            logger.error(f"Error generating or sending response: {str(e)}", exc_info=True)
+            await sio.emit("error", {"message": f"Error processing your message: {str(e)}"}, to=sid)
+            
+    except Exception as e:
+        logger.error(f"WebSocket error: {str(e)}", exc_info=True)
+        error_msg = f"Error processing message: {str(e)}"
+        await sio.emit("error", {"message": error_msg}, to=sid)
 
 @sio.event
 async def audio_chunk(sid, data):
+    """Handle incoming audio chunks, transcribe, and respond with AI-generated audio.
+    
+    This is a legacy endpoint that processes audio chunks directly. It's recommended
+    to use the text-based WebSocket endpoint for new implementations.
+    """
+    global ai_agent
+    
+    if ai_agent is None:
+        logger.error("AI Agent not initialized")
+        await sio.emit("error", {"message": "AI Agent not initialized"}, to=sid)
+        return
+        
     try:
-        logger.info(f"Received audio chunk from {sid}")
+        logger.info(f"Received audio chunk from {sid} (legacy mode)")
         
         # Extract audio data and persona from the incoming message
         if isinstance(data, dict) and 'audio' in data:
@@ -584,28 +1059,47 @@ async def audio_chunk(sid, data):
             transcript_text = transcription_result.get('text', '')
             confidence = transcription_result.get('confidence', 0.0)
             
+            if not transcript_text.strip():
+                logger.warning("Empty transcription result")
+                await sio.emit("error", {"message": "Could not transcribe audio. Please try again."}, to=sid)
+                return
+                
             logger.info(f"Transcription complete (confidence: {confidence:.2f}): {transcript_text[:100]}...")
             
-            # Initialize conversation state if it doesn't exist or if persona has changed
-            from app.services.ai_response import start_new_conversation
-            if sid not in conversation_states or conversation_states[sid].persona != persona:
-                conversation_states[sid] = start_new_conversation(sid, persona)
-                logger.info(f"Started new conversation with {persona} persona")
-            
-            logger.info("Generating investor response...")
-            investor_reply = generate_investor_response(conversation_states[sid], transcript_text)
-            
-            logger.info("Converting response to speech...")
-            # Get audio data directly without saving to file
-            audio_data = convert_text_to_speech(investor_reply)
-            
-            if not audio_data:
-                raise ValueError("Failed to generate audio response")
+            # Generate response using the AI agent
+            try:
+                investor_reply = ai_agent.generate_response(sid, transcript_text)
                 
-            logger.info(f"Generated {len(audio_data)} bytes of audio data")
+                logger.info("Converting response to speech with persona-specific voice...")
+                # Get audio data directly without saving to file using persona-specific voice
+                audio_data = convert_text_to_speech_with_persona(investor_reply, persona)
+                
+                if not audio_data:
+                    raise ValueError("Failed to generate audio response")
+                    
+                logger.info(f"Generated {len(audio_data)} bytes of audio data")
+                
+                # Send the audio data directly to the client
+                await sio.emit("ai_response", audio_data, to=sid)
+                
+            except KeyError:
+                # If conversation doesn't exist, start a new one and retry
+                logger.info(f"Starting new conversation for {sid} with {persona} persona")
+                await sio.emit("status", {"message": "Starting new conversation..."}, to=sid)
+                
+                # Start a new conversation
+                ai_agent.start_conversation(sid, persona)
+                
+                # Get the initial greeting
+                initial_greeting = "Hello! I'm your AI investor. How can I help you today?"
+                
+                # Convert greeting to speech
+                audio_data = convert_text_to_speech_with_persona(initial_greeting, persona)
+                await sio.emit("ai_response", audio_data, to=sid)
             
-            # Send the audio data directly to the client
-            await sio.emit("ai_response", audio_data, to=sid)
+        except Exception as e:
+            logger.error(f"Error processing audio chunk: {str(e)}", exc_info=True)
+            await sio.emit("error", {"message": f"Error processing audio: {str(e)}"}, to=sid)
             
         finally:
             # Clean up the temporary file
@@ -614,8 +1108,9 @@ async def audio_chunk(sid, data):
                     os.unlink(temp_audio_path)
             except Exception as e:
                 logger.warning(f"Failed to delete temporary file {temp_audio_path}: {e}")
+                
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}", exc_info=True)
+        logger.error(f"WebSocket error in audio_chunk: {str(e)}", exc_info=True)
         await sio.emit("error", {"message": f"Error processing audio: {str(e)}"}, to=sid)
 
 
@@ -629,7 +1124,7 @@ if __name__ == "__main__":
     import os
     
     # Get host and port from environment variables with defaults
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8080"))
     
     # Only enable reload in development
