@@ -65,8 +65,16 @@ class PitchWorkflowAgent:
     """LangGraph-based pitch practice workflow"""
     
     def __init__(self):
+        """
+        Initialize a new PitchWorkflowAgent instance
+        
+        Creates the LangGraph workflow and initializes the memory as an empty dictionary.
+        Also creates a MemorySaver instance to save the state of the workflow.
+        """
+        # Initialize memory_saver first as it's used in _create_workflow
+        self.memory_saver = MemorySaver()
         self.workflow = self._create_workflow()
-        self.memory = MemorySaver()
+        self.memory = {}  # Initialize memory as an empty dictionary
         
     def _create_workflow(self) -> StateGraph:
         """Create the LangGraph workflow"""
@@ -104,7 +112,7 @@ class PitchWorkflowAgent:
         workflow.add_edge("transition_stage", "assess_stage")
         workflow.add_edge("finalize_session", END)
         
-        return workflow.compile(checkpointer=self.memory)
+        return workflow.compile(checkpointer=self.memory_saver)
     
     def _initialize_session(self, state: PitchWorkflowState) -> PitchWorkflowState:
         """Initialize a new pitch practice session"""
