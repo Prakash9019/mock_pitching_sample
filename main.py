@@ -8,6 +8,8 @@ from datetime import datetime
 import shutil
 from typing import Optional, Union, BinaryIO
 import logging
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 
 # Socket.IO integration
 import socketio
@@ -17,6 +19,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.services.transcription import transcribe_audio
 from app.services.intelligent_ai_agent import get_conversation_statistics
 from app.services.enhanced_text_to_speech import convert_text_to_speech_with_persona
+
+# Import improved AI systems
+from app.services.integration_example import (
+    start_practice_session,
+    handle_practice_message,
+    get_practice_analytics,
+    get_pitch_manager
+)
+
+# Import improved AI systems
+from app.services.integration_example import (
+    start_practice_session,
+    handle_practice_message,
+    get_practice_analytics,
+    get_pitch_manager
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -29,6 +47,7 @@ fastapi_app = FastAPI(
     description="API for simulating investor pitch sessions with AI-generated responses",
     version="1.0.0"
 )
+
 
 # Add CORS middleware to FastAPI app
 fastapi_app.add_middleware(
@@ -70,498 +89,16 @@ logger.info(f"Upload directory: {UPLOAD_DIR}")
 logger.info(f"Response directory: {RESPONSE_DIR}")
 logger.info(f"Session directory: {SESSION_DIR}")
 
-@fastapi_app.get("/")
-async def root():
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>🎙️ AI Investor Pitch</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            text-align: center;
-          }
-          
-          /* Audio level indicator */
-          #audio-level-container {
-            width: 100%;
-            height: 10px;
-            background: #f0f0f0;
-            border-radius: 5px;
-            margin: 10px 0;
-            overflow: hidden;
-          }
-          
-          #audio-level {
-            height: 100%;
-            width: 0%;
-            background: #2196F3;
-            transition: width 0.1s, background-color 0.3s;
-          }
-        .controls {
-          margin: 30px 0;
-        }
-        button {
-          padding: 12px 24px;
-          margin: 0 10px;
-          font-size: 16px;
-          border: none;
-          border-radius: 5px;
-          cursor: pointer;
-          transition: all 0.3s;
-        }
-        #startBtn {
-          background-color: #4CAF50;
-          color: white;
-        }
-        #recordBtn {
-          background-color: #4CAF50;
-          color: white;
-          display: none;
-        }
-        #recordBtn.active {
-          background-color: #f44336;
-          animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7); }
-          70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
-        }
-        #pauseBtn {
-          background-color: #ff9800;
-          color: white;
-          display: none;
-        }
-        #endBtn {
-          background-color: #555555;
-          color: white;
-          display: none;
-        }
-        #status {
-          margin: 20px 0;
-          padding: 10px;
-          border-radius: 5px;
-          font-weight: bold;
-        }
-        .active {
-          opacity: 0.8;
-          transform: scale(0.95);
-        }
-        #audioPlayer {
-          width: 100%;
-          max-width: 500px;
-          margin: 20px auto;
-          display: block;
-        }
-      </style>
-    </head>
-    <body>
-      <h1>🎤 AI Investor Pitch Practice</h1>
-      
-      <div id="status">Click 'Start Meeting' to begin your pitch session with real-time speech recognition</div>
-      
-      <div id="conversationProgress" style="
-        display: none;
-        margin: 15px 0;
-        padding: 15px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-      ">
-        <div id="progressInfo" style="margin-bottom: 10px;">
-          <strong id="investorName">Investor:</strong> <span id="currentStage">Getting started...</span>
-        </div>
-        <div id="progressBar" style="
-          width: 100%;
-          height: 8px;
-          background-color: rgba(255,255,255,0.3);
-          border-radius: 4px;
-          overflow: hidden;
-        ">
-          <div id="progressFill" style="
-            width: 0%;
-            height: 100%;
-            background-color: #4CAF50;
-            transition: width 0.5s ease;
-          "></div>
-        </div>
-        <div id="stageCounter" style="margin-top: 8px; font-size: 12px; opacity: 0.9;">
-          Stage 1 of 12
-        </div>
-      </div>
-      
-      <div class="controls">
-        <div style="margin-bottom: 20px; text-align: center;">
-          <label for="personaSelect" style="margin-right: 10px; font-size: 16px;">Investor Type:</label>
-          <select id="personaSelect" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 16px;">
-            <option value="friendly">🤝 Friendly</option>
-            <option value="skeptical" selected>🤨 Skeptical</option>
-            <option value="technical">🔧 Technical</option>
-          </select>
-        </div>
-        <div>
-          <button id="startBtn">🚀 Start Meeting</button>
-          <button id="recordBtn" style="display: none;">🎙️ Start Speaking</button>
-          <button id="pauseBtn" style="display: none;">⏸️ Pause & Send</button>
-          <button id="endBtn" style="display: none;">⏹️ End Meeting</button>
-          <div id="audio-level-container" style="display: none;">
-            <div id="audio-level"></div>
-          </div>
-        </div>
-      </div>
-      
-      <div id="transcriptDisplay" style="
-        margin: 20px 0;
-        padding: 15px;
-        border: 2px dashed #ccc;
-        border-radius: 10px;
-        min-height: 100px;
-        background-color: #f9f9f9;
-        font-style: italic;
-        color: #666;
-        display: none;
-        text-align: left;
-      ">
-        Your speech will appear here in real-time...
-      </div>
-      
-      <audio id="audioPlayer" controls></audio>
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(BASE_PATH, "templates"))
 
-      <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-      <script>
-        // DOM Elements
-        const startBtn = document.getElementById('startBtn');
-        const recordBtn = document.getElementById('recordBtn');
-        const pauseBtn = document.getElementById('pauseBtn');
-        const endBtn = document.getElementById('endBtn');
-        const audioPlayer = document.getElementById('audioPlayer');
-        const statusElement = document.getElementById('status');
-        const personaSelect = document.getElementById('personaSelect');
-        const transcriptDisplay = document.getElementById('transcriptDisplay');
-        const conversationProgress = document.getElementById('conversationProgress');
-        const investorName = document.getElementById('investorName');
-        const currentStage = document.getElementById('currentStage');
-        const progressFill = document.getElementById('progressFill');
-        const stageCounter = document.getElementById('stageCounter');
-        
-        // Speech recognition variables
-        let recognition;
-        let isListening = false;
-        let currentTranscript = '';
-        let interimTranscript = '';
-        let audioStream;
-        let socket;
-        
-        // Investor persona information
-        const investorPersonas = {
-          'skeptical': {
-            name: 'Sarah Martinez',
-            title: 'Senior Partner at Venture Capital',
-            description: 'Analytical and thorough investor who asks tough questions'
-          },
-          'technical': {
-            name: 'Dr. Alex Chen', 
-            title: 'CTO-turned-Investor at TechVentures',
-            description: 'Tech-focused investor interested in deep technical details'
-          },
-          'friendly': {
-            name: 'Michael Thompson',
-            title: 'Angel Investor & Former Entrepreneur',
-            description: 'Supportive investor focused on founder journey'
-          }
-        };
+fastapi_app.mount("/static", StaticFiles(directory=os.path.join(BASE_PATH, "static")), name="static")
 
-        // Initialize socket connection
-        function initSocket() {
-          socket = io({
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000
-          });
 
-          socket.on('connect', () => {
-            console.log('Connected to server');
-            updateStatus('Connected. Ready to start the pitch session.', 'info');
-          });
+@fastapi_app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-          socket.on('disconnect', () => {
-            updateStatus('Disconnected from server. Please refresh the page.', 'error');
-          });
-
-          socket.on('ai_response', (data) => {
-            try {
-              const blob = new Blob([data], { type: 'audio/mp3' });
-              const url = URL.createObjectURL(blob);
-              audioPlayer.src = url;
-              audioPlayer.play();
-              updateStatus('AI response received. Click "Start Speaking" to respond.', 'success');
-              
-              // Hide the transcript display after receiving response
-              setTimeout(() => {
-                transcriptDisplay.style.display = 'none';
-              }, 2000);
-              
-              // Update conversation progress
-              updateConversationProgress(personaSelect.value);
-            } catch (error) {
-              console.error('Error playing AI response:', error);
-              updateStatus('Error playing AI response', 'error');
-            }
-          });
-        }
-
-        // Update status message
-        function updateStatus(message, type = 'info') {
-          statusElement.textContent = message;
-          statusElement.style.color = type === 'error' ? '#f44336' : 
-                                     type === 'success' ? '#4CAF50' : '#2196F3';
-        }
-        
-        // Update conversation progress
-        function updateConversationProgress(persona) {
-          const personaInfo = investorPersonas[persona];
-          if (personaInfo) {
-            investorName.textContent = `${personaInfo.name} - ${personaInfo.title}`;
-            conversationProgress.style.display = 'block';
-            
-            // Fetch and update conversation stats
-            if (socket && socket.id) {
-              fetch(`/api/conversation/${socket.id}/stats`)
-                .then(response => response.json())
-                .then(stats => {
-                  if (stats.topics_covered) {
-                    const currentTopic = stats.topics_covered[stats.topics_covered.length - 1] || 'getting_started';
-                    currentStage.textContent = currentTopic.replace('_', ' ').toUpperCase();
-                    progressFill.style.width = stats.progress_percentage + '%';
-                    stageCounter.textContent = `${stats.topics_covered.length} of 8 topics covered`;
-                  }
-                })
-                .catch(error => console.log('Stats not available yet'));
-            }
-          }
-        }
-
-        // Start Meeting
-        startBtn.addEventListener('click', async () => {
-          try {
-            updateStatus('Initializing meeting...', 'info');
-            initSocket();
-            
-            // Check for speech recognition support
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-              throw new Error('Speech recognition not supported in this browser. Please use Chrome, Edge, or Safari.');
-            }
-            
-            // Initialize speech recognition
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            
-            // Configure speech recognition
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
-            recognition.maxAlternatives = 1;
-            
-            // Handle speech recognition results
-            recognition.onresult = (event) => {
-              let finalTranscript = '';
-              let interimTranscript = '';
-              
-              for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                if (event.results[i].isFinal) {
-                  finalTranscript += transcript + ' ';
-                } else {
-                  interimTranscript += transcript;
-                }
-              }
-              
-              if (finalTranscript) {
-                currentTranscript += finalTranscript;
-              }
-              
-              // Update transcript display with both final and interim results
-              const displayText = currentTranscript + interimTranscript;
-              if (displayText.trim()) {
-                transcriptDisplay.innerHTML = `<strong>Your speech:</strong><br>"${displayText}"`;
-                transcriptDisplay.style.color = '#333';
-                transcriptDisplay.style.fontStyle = 'normal';
-              }
-              
-              // Update status
-              if (interimTranscript) {
-                updateStatus('Listening... Keep speaking.', 'info');
-              } else if (finalTranscript) {
-                updateStatus('Listening... Speech captured.', 'info');
-              }
-            };
-            
-            recognition.onerror = (event) => {
-              console.error('Speech recognition error:', event.error);
-              updateStatus(`Speech recognition error: ${event.error}`, 'error');
-            };
-            
-            recognition.onend = () => {
-              if (isListening) {
-                // Restart recognition if we're still supposed to be listening
-                try {
-                  recognition.start();
-                } catch (error) {
-                  console.error('Error restarting recognition:', error);
-                }
-              }
-            };
-            
-            // Request microphone access for audio level monitoring
-            try {
-              audioStream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { echoCancellation: true, noiseSuppression: true } 
-              });
-              setupAudioMeter(audioStream);
-            } catch (error) {
-              console.warn('Could not access microphone for audio level monitoring:', error);
-            }
-            
-            // Update UI
-            startBtn.style.display = 'none';
-            recordBtn.style.display = 'inline-block';
-            endBtn.style.display = 'inline-block';
-            updateStatus('Meeting started. Click "Start Speaking" to begin real-time speech recognition.', 'success');
-            
-            // Show conversation progress
-            updateConversationProgress(personaSelect.value);
-            
-          } catch (error) {
-            console.error('Error starting meeting:', error);
-            updateStatus(`Error: ${error.message}`, 'error');
-          }
-        });
-
-        // Start Speaking Button
-        recordBtn.addEventListener('click', () => {
-          if (!isListening) {
-            // Start speech recognition
-            try {
-              currentTranscript = ''; // Reset transcript
-              transcriptDisplay.style.display = 'block';
-              transcriptDisplay.innerHTML = 'Listening... Start speaking now.';
-              transcriptDisplay.style.color = '#666';
-              transcriptDisplay.style.fontStyle = 'italic';
-              
-              recognition.start();
-              isListening = true;
-              recordBtn.classList.add('active');
-              recordBtn.textContent = '🎙️ Listening...';
-              pauseBtn.style.display = 'inline-block';
-              document.getElementById('audio-level-container').style.display = 'block';
-              updateStatus('Listening... Start speaking now.', 'info');
-            } catch (error) {
-              console.error('Error starting speech recognition:', error);
-              updateStatus('Error starting speech recognition', 'error');
-            }
-          }
-        });
-
-        // Pause & Send Button
-        pauseBtn.addEventListener('click', () => {
-          if (isListening) {
-            // Stop speech recognition and send the transcript
-            recognition.stop();
-            isListening = false;
-            recordBtn.classList.remove('active');
-            recordBtn.textContent = '🎙️ Start Speaking';
-            pauseBtn.style.display = 'none';
-            document.getElementById('audio-level-container').style.display = 'none';
-            
-            if (currentTranscript.trim()) {
-              transcriptDisplay.innerHTML = `<strong>Sent:</strong><br>"${currentTranscript.trim()}"`;
-              transcriptDisplay.style.color = '#2196F3';
-              updateStatus('Sending your message to AI...', 'info');
-              socket.emit('text_message', {
-                text: currentTranscript.trim(),
-                persona: personaSelect.value
-              });
-            } else {
-              transcriptDisplay.style.display = 'none';
-              updateStatus('No speech detected. Please try again.', 'error');
-            }
-          }
-        });
-
-        // End Session
-        endBtn.addEventListener('click', () => {
-          if (isListening) {
-            recognition.stop();
-            isListening = false;
-          }
-          
-          // Stop all tracks in the stream
-          if (audioStream) {
-            audioStream.getTracks().forEach(track => track.stop());
-          }
-          
-          // Reset UI
-          startBtn.style.display = 'inline-block';
-          recordBtn.style.display = 'none';
-          pauseBtn.style.display = 'none';
-          endBtn.style.display = 'none';
-          recordBtn.textContent = '🎙️ Start Speaking';
-          document.getElementById('audio-level-container').style.display = 'none';
-          transcriptDisplay.style.display = 'none';
-          conversationProgress.style.display = 'none';
-          
-          updateStatus('Session ended. Click "Start Meeting" to begin a new session.', 'info');
-          
-          // Disconnect socket
-          if (socket) {
-            socket.disconnect();
-          }
-        });
-
-        // Audio level monitoring function
-        function setupAudioMeter(stream) {
-          try {
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(stream);
-            const analyser = audioContext.createAnalyser();
-            source.connect(analyser);
-            
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            
-            function checkLevel() {
-              analyser.getByteFrequencyData(dataArray);
-              const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-              // Visual feedback for audio level
-              const levelIndicator = document.getElementById('audio-level');
-              if (levelIndicator) {
-                levelIndicator.style.width = `${Math.min(100, average)}%`;
-                levelIndicator.style.backgroundColor = average > 50 ? '#4CAF50' : '#2196F3';
-              }
-              requestAnimationFrame(checkLevel);
-            }
-            checkLevel();
-          } catch (error) {
-            console.warn('Audio level monitoring not available:', error);
-          }
-        }
-
-        // Check for browser support
-        if (!navigator.mediaDevices || !window.MediaRecorder) {
-          updateStatus('Your browser does not support audio recording. Please use Chrome, Firefox, or Edge.', 'error');
-          startBtn.disabled = true;
-        }
-      </script>
-    </body>
-    </html>
-    """)
 
 @fastapi_app.post("/pitch")
 async def process_pitch(
@@ -585,7 +122,7 @@ async def process_pitch(
             raise HTTPException(status_code=500, detail="AI Agent not initialized")
         investor_response = ai_agent.generate_response(str(uuid.uuid4()), transcript)
         response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_response.mp3")
-        convert_text_to_speech(investor_response, response_audio_path)
+        convert_text_to_speech_with_persona(investor_response, response_audio_path, investor_persona)
 
         session_data = {
             "session_id": session_id,
@@ -807,9 +344,12 @@ async def get_conversation_stats(conversation_id: str):
 # Global instance of the AI agent
 ai_agent = None
 
+# Global dictionary to store conversation states
+conversation_states = {}
+
 @fastapi_app.on_event("startup")
 async def startup_event():
-    """Initialize the AI agent when the application starts"""
+    """Initialize all AI agents when the application starts"""
     global ai_agent
     try:
         from app.services.intelligent_ai_agent import IntelligentAIAgent
@@ -822,12 +362,16 @@ async def startup_event():
             google_api_key=os.getenv("GEMINI_API_KEY")
         )
         
-        # Initialize the AI agent
+        # Initialize the original AI agent (for backwards compatibility)
         ai_agent = IntelligentAIAgent(llm)
-        logger.info("AI Agent initialized successfully")
+        logger.info("Original AI Agent initialized successfully")
+        
+        # Initialize the improved pitch manager and systems
+        manager = get_pitch_manager()
+        logger.info("Improved AI systems initialized successfully")
         
     except Exception as e:
-        logger.error(f"Failed to initialize AI agent: {str(e)}", exc_info=True)
+        logger.error(f"Failed to initialize AI systems: {str(e)}", exc_info=True)
         raise
 
 @fastapi_app.post("/api/conversation/start")
@@ -934,6 +478,279 @@ async def debug_conversations():
     except Exception as e:
         logger.error(f"Error getting debug info: {str(e)}")
         return {"error": str(e)}
+
+# ===== NEW IMPROVED AI SYSTEMS ENDPOINTS =====
+
+@fastapi_app.post("/api/pitch/start")
+async def start_pitch_practice(
+    persona: str = "friendly",
+    system: str = "workflow"
+):
+    """Start a new pitch practice session with improved AI systems
+    
+    Args:
+        persona: Investor personality (friendly, skeptical, technical)
+        system: AI system to use (workflow, improved)
+    
+    Returns:
+        Session info with initial greeting
+    """
+    try:
+        # Validate inputs
+        valid_personas = ["friendly", "skeptical", "technical"]
+        valid_systems = ["workflow", "improved"]
+        
+        if persona not in valid_personas:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid persona. Choose from: {', '.join(valid_personas)}"
+            )
+        
+        if system not in valid_systems:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid system. Choose from: {', '.join(valid_systems)}"
+            )
+        
+        # Start the session
+        session_data = start_practice_session(system, persona)
+        
+        if "error" in session_data:
+            raise HTTPException(status_code=500, detail=session_data["error"])
+        
+        logger.info(f"Started {system} pitch session with {persona} persona: {session_data.get('session_id')}")
+        
+        return {
+            "success": True,
+            "session_id": session_data.get("session_id"),
+            "message": session_data.get("message"),
+            "persona": persona,
+            "system": system,
+            "stage": session_data.get("stage"),
+            "type": session_data.get("type")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting pitch practice: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start pitch practice: {str(e)}")
+
+@fastapi_app.post("/api/pitch/message")
+async def process_pitch_message(
+    session_id: str,
+    message: str,
+    background_tasks: BackgroundTasks
+):
+    """Process a founder's message in the pitch practice session
+    
+    Args:
+        session_id: Session identifier
+        message: Founder's message/response
+        background_tasks: For generating audio response
+    
+    Returns:
+        Investor's response with session info
+    """
+    try:
+        if not session_id or not message:
+            raise HTTPException(status_code=400, detail="session_id and message are required")
+        
+        # Process the message
+        response_data = handle_practice_message(session_id, message)
+        
+        if "error" in response_data:
+            raise HTTPException(status_code=404, detail=response_data["error"])
+        
+        # Generate audio response in background if system supports it
+        investor_response = response_data.get("message", "")
+        if investor_response:
+            # Determine persona from session (you might want to store this separately)
+            session_analytics = get_practice_analytics(session_id)
+            persona = session_analytics.get("persona", "friendly")
+            
+            # Generate audio response
+            response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_latest_response.mp3")
+            background_tasks.add_task(
+                convert_text_to_speech_with_persona,
+                investor_response,
+                response_audio_path,
+                persona
+            )
+        
+        logger.info(f"Processed message for session {session_id}: {message[:50]}...")
+        
+        return {
+            "success": True,
+            "message": investor_response,
+            "session_id": session_id,
+            "stage": response_data.get("stage"),
+            "complete": response_data.get("complete", False),
+            "insights": response_data.get("insights", {}),
+            "type": response_data.get("type"),
+            "audio_url": f"/download/{session_id}_latest_response.mp3" if investor_response else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing pitch message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
+
+@fastapi_app.get("/api/pitch/analytics/{session_id}")
+async def get_pitch_session_analytics(session_id: str):
+    """Get comprehensive analytics for a pitch practice session
+    
+    Args:
+        session_id: Session identifier
+    
+    Returns:
+        Detailed session analytics and insights
+    """
+    try:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        analytics = get_practice_analytics(session_id)
+        
+        if "error" in analytics:
+            raise HTTPException(status_code=404, detail=analytics["error"])
+        
+        logger.info(f"Retrieved analytics for session {session_id}")
+        
+        return {
+            "success": True,
+            "analytics": analytics
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pitch analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+
+@fastapi_app.get("/api/pitch/sessions/active")
+async def get_active_pitch_sessions():
+    """Get all active pitch practice sessions
+    
+    Returns:
+        List of active sessions with basic info
+    """
+    try:
+        manager = get_pitch_manager()
+        active_sessions = []
+        
+        for session_id, session_info in manager.active_sessions.items():
+            try:
+                analytics = get_practice_analytics(session_id)
+                if "error" not in analytics:
+                    active_sessions.append({
+                        "session_id": session_id,
+                        "type": session_info.get("type"),
+                        "persona": session_info.get("persona"),
+                        "founder_name": analytics.get("founder_name", ""),
+                        "company_name": analytics.get("company_name", ""),
+                        "current_stage": analytics.get("current_stage"),
+                        "duration_minutes": analytics.get("duration_minutes", 0)
+                    })
+            except Exception as e:
+                logger.warning(f"Error getting info for session {session_id}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "active_sessions": active_sessions,
+            "total_sessions": len(active_sessions)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting active sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get active sessions: {str(e)}")
+
+@fastapi_app.post("/api/pitch/compare")
+async def compare_ai_systems(
+    test_messages: list = None
+):
+    """Compare the performance of different AI systems with the same conversation
+    
+    Args:
+        test_messages: List of test messages to send to both systems
+    
+    Returns:
+        Comparison results between improved agent and workflow systems
+    """
+    try:
+        # Default test conversation if none provided
+        if not test_messages:
+            test_messages = [
+                "Hi, I'm Alex and my startup is GreenTech Solutions",
+                "We're solving climate change by helping companies reduce their carbon footprint",
+                "Our target market is mid-size companies that want to go carbon neutral",
+                "We make money through SaaS subscriptions and consulting services"
+            ]
+        
+        manager = get_pitch_manager()
+        comparison_results = manager.compare_systems(test_messages)
+        
+        if "error" in comparison_results:
+            raise HTTPException(status_code=500, detail=comparison_results["error"])
+        
+        logger.info("Completed AI systems comparison")
+        
+        return {
+            "success": True,
+            "comparison": comparison_results,
+            "test_messages": test_messages
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing AI systems: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to compare systems: {str(e)}")
+
+# ===== END OF NEW ENDPOINTS =====
+
+@fastapi_app.get("/api/pitch/status")
+async def get_pitch_systems_status():
+    """Get the status of all pitch practice systems
+    
+    Returns:
+        Status of improved agent and LangGraph workflow systems
+    """
+    try:
+        manager = get_pitch_manager()
+        
+        # Test both systems quickly
+        status = {
+            "success": True,
+            "systems": {
+                "improved_agent": {
+                    "available": manager.improved_agent is not None,
+                    "initialized": True if manager.improved_agent else False
+                },
+                "langgraph_workflow": {
+                    "available": manager.workflow_agent is not None,
+                    "initialized": True if manager.workflow_agent else False
+                }
+            },
+            "active_sessions": len(manager.active_sessions),
+            "supported_personas": ["friendly", "skeptical", "technical"],
+            "supported_systems": ["improved", "workflow"]
+        }
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Error getting pitch systems status: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "systems": {
+                "improved_agent": {"available": False, "initialized": False},
+                "langgraph_workflow": {"available": False, "initialized": False}
+            }
+        }
 
 @sio.event
 async def connect(sid, environ):

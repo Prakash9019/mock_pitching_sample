@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Pitch Simulator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="/static/js/main.js" defer></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const video = document.getElementById('videoPreview');
+      if (navigator.mediaDevices?.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: true })
+          .then(stream => video.srcObject = stream)
+          .catch(err => console.warn('Webcam access failed:', err));
+      }
+    });
+  </script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+
+  <div class="flex flex-col md:flex-row h-screen">
+
+    <!-- Left Side: Video Panel -->
+    <div class="w-full md:w-1/2 bg-indigo-800 text-white p-8 flex flex-col justify-between">
+      <div>
+        <h1 class="text-3xl font-bold mb-2">🎤 AI Pitch Simulator</h1>
+        <p class="text-indigo-200">Powered by voice and video, practice your pitch with real AI feedback</p>
+      </div>
+      <div class="flex-1 flex items-center justify-center mt-8">
+        <video id="videoPreview" autoplay muted playsinline class="rounded-xl shadow-lg w-full max-w-sm h-64 object-cover bg-black"></video>
+      </div>
+      <div class="mt-6 text-indigo-200 text-sm">💡 Tip: Use gestures and facial expressions to engage your virtual investor</div>
+    </div>
+
+    <!-- Right Side: Control Panel -->
+    <div class="w-full md:w-1/2 bg-white p-8 overflow-y-auto space-y-6">
+
+      <!-- Status -->
+      <div id="status" class="text-center text-blue-600 font-medium text-lg">Click 'Start Meeting' to begin</div>
+
+      <!-- Persona -->
+      <div class="flex items-center justify-center gap-4">
+        <label for="personaSelect" class="text-md font-semibold">🎭 Persona:</label>
+        <select id="personaSelect" class="px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+          <option value="friendly">🤝 Friendly</option>
+          <option value="skeptical" selected>🧐 Skeptical</option>
+          <option value="technical">🧠 Technical</option>
+        </select>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex flex-wrap justify-center gap-3">
+        <button id="startBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow">🚀 Start</button>
+        <button id="recordBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow hidden">🎙️ Speak</button>
+        <button id="pauseBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2 rounded-lg shadow hidden">⏸️ Send</button>
+        <button id="endBtn" class="bg-gray-700 hover:bg-gray-800 text-white px-6 py-2 rounded-lg shadow hidden">⏹️ End</button>
+      </div>
+
+      <!-- Progress -->
+      <div id="conversationProgress" class="hidden bg-indigo-600 text-white p-4 rounded-lg shadow space-y-2">
+        <div><strong id="investorName">Investor:</strong> <span id="currentStage">Getting started...</span></div>
+        <div class="w-full h-2 bg-white bg-opacity-30 rounded">
+          <div id="progressFill" class="h-full w-0 bg-green-300 rounded transition-all duration-500"></div>
+        </div>
+        <div id="stageCounter" class="text-sm text-white/80">Stage 1 of 12</div>
+      </div>
+
+      <!-- Audio Level -->
+      <div id="audio-level-container" class="w-full h-2 bg-gray-200 rounded-full overflow-hidden hidden">
+        <div id="audio-level" class="h-full w-0 bg-blue-500 transition-all duration-100"></div>
+      </div>
+
+      <!-- Transcript -->
+      <div id="transcriptDisplay" class="hidden p-4 bg-gray-50 border-l-4 border-indigo-500 rounded-md text-gray-700 italic shadow">
+        Your speech will appear here in real-time...
+      </div>
+
+      <!-- AI Audio -->
+      <div class="text-center mt-4">
+        <audio id="audioPlayer" controls class="w-full max-w-md mx-auto rounded shadow"></audio>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>
