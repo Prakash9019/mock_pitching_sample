@@ -16,6 +16,63 @@
           .catch(err => console.warn('Webcam access failed:', err));
       }
     });
+
+    function showAnalysisButton(sessionId) {
+      const analysisBtn = document.getElementById('analysisBtn');
+      analysisBtn.href = `/pitch/analysis/${sessionId}`;
+      analysisBtn.classList.remove('hidden');
+    }
+
+    function handleSessionEnd(sessionId) {
+      // ... existing end session code ...
+      showAnalysisButton(sessionId);
+    }
+
+    function showAnalysisButtons() {
+      const quickAnalysisBtn = document.getElementById('quickAnalysisBtn');
+      const fullAnalysisBtn = document.getElementById('fullAnalysisBtn');
+      quickAnalysisBtn.classList.remove('hidden');
+      fullAnalysisBtn.classList.remove('hidden');
+    }
+
+    function updateRealtimeAnalysis(analysis) {
+      const realtimeAnalysis = document.getElementById('realtimeAnalysis');
+      const currentScore = document.getElementById('currentScore');
+      const keyInsights = document.getElementById('keyInsights');
+      
+      realtimeAnalysis.classList.remove('hidden');
+      currentScore.textContent = `${analysis.overall_score}%`;
+      
+      // Update key insights
+      keyInsights.innerHTML = '';
+      analysis.key_insights.forEach(insight => {
+        const li = document.createElement('li');
+        li.textContent = insight;
+        keyInsights.appendChild(li);
+      });
+    }
+
+    socket.on('analysis_update', (data) => {
+      updateRealtimeAnalysis(data.analysis);
+    });
+
+    document.getElementById('quickAnalysisBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch(`/api/pitch/analysis/${currentSessionId}/quick`);
+        const data = await response.json();
+        if (data.success) {
+          updateRealtimeAnalysis(data.analysis);
+        }
+      } catch (error) {
+        console.error('Error getting quick analysis:', error);
+      }
+    });
+
+    function handleSessionStart(sessionId) {
+      currentSessionId = sessionId;
+      showAnalysisButtons();
+      // ... rest of your existing start session code ...
+    }
   </script>
 </head>
 <body class="bg-gray-100 min-h-screen font-sans">
@@ -56,6 +113,25 @@
         <button id="recordBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow hidden">🎙️ Speak</button>
         <button id="pauseBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2 rounded-lg shadow hidden">⏸️ Send</button>
         <button id="endBtn" class="bg-gray-700 hover:bg-gray-800 text-white px-6 py-2 rounded-lg shadow hidden">⏹️ End</button>
+        <button id="quickAnalysisBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg shadow hidden">📊 Quick Analysis</button>
+        <a id="fullAnalysisBtn" href="#" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg shadow hidden">📈 Full Analysis</a>
+      </div>
+
+      <!-- Real-time Analysis Panel -->
+      <div id="realtimeAnalysis" class="mt-4 p-4 bg-white rounded-lg shadow-lg hidden">
+        <h3 class="text-lg font-semibold mb-2">Real-time Analysis</h3>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="p-3 bg-gray-50 rounded">
+            <h4 class="font-medium text-gray-700">Current Score</h4>
+            <div id="currentScore" class="text-2xl font-bold text-purple-600">-</div>
+          </div>
+          <div class="p-3 bg-gray-50 rounded">
+            <h4 class="font-medium text-gray-700">Key Insights</h4>
+            <ul id="keyInsights" class="text-sm text-gray-600">
+              <li>Start speaking to see insights...</li>
+            </ul>
+          </div>
+        </div>
       </div>
 
       <!-- Progress -->

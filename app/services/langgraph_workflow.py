@@ -22,6 +22,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Local imports
 from .intelligent_ai_agent_improved import INVESTOR_PERSONAS, PitchStage, PITCH_STAGES
+from .pitch_analysis import PitchAnalyzer, PitchAnalysis
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,6 +34,9 @@ llm = ChatGoogleGenerativeAI(
     temperature=0.7,
     convert_system_message_to_human=True
 )
+
+# Initialize pitch analyzer
+pitch_analyzer = PitchAnalyzer(llm)
 
 class PitchWorkflowState(TypedDict):
     """State for the pitch practice workflow"""
@@ -60,6 +64,11 @@ class PitchWorkflowState(TypedDict):
     stage_durations: Dict[str, float]
     questions_asked: List[str]
     key_insights: Dict[str, List[str]]
+    
+    # Pitch Analysis
+    pitch_analysis: Optional[Dict[str, Any]]
+    last_analysis_timestamp: Optional[str]
+    analysis_history: List[Dict[str, Any]]
 
 class PitchWorkflowAgent:
     """LangGraph-based pitch practice workflow"""
@@ -242,72 +251,50 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
         return prompt
     
     def _evaluate_founder_response(self, state: PitchWorkflowState) -> PitchWorkflowState:
-        """Evaluate the founder's response and extract key insights"""
-        
-        # Get the latest founder message
-        latest_messages = state["messages"][-2:]  # Last 2 messages (question and response)
-        if len(latest_messages) < 2:
-            return state
-        
-        founder_response = latest_messages[-1].content if latest_messages[-1].__class__.__name__ == "HumanMessage" else ""
-        
-        if not founder_response:
-            return state
-        
-        current_stage = state["current_stage"]
-        
-        # Evaluate response completeness
-        evaluation_prompt = f"""
-        Evaluate this founder's response to the investor question:
-        
-        Question: {state['current_question']}
-        Response: {founder_response}
-        
-        1. Is the response complete and informative? (yes/no)
-        2. What key insights can be extracted? (list 2-3 bullet points)
-        3. Does this response warrant a follow-up question in the same topic? (yes/no)
-        
-        Format your response as:
-        COMPLETE: yes/no
-        INSIGHTS: 
-        - insight 1
-        - insight 2
-        FOLLOW_UP_NEEDED: yes/no
-        """
-        
+        """Evaluate the founder's response and update analysis"""
         try:
-            evaluation = llm.invoke(evaluation_prompt)
-            eval_text = evaluation.content
+            # Get the latest message
+            latest_message = state["messages"][-1]
+            if not isinstance(latest_message, HumanMessage):
+                return state
+                
+            response_text = latest_message.content
             
-            # Parse evaluation
-            complete = "yes" in eval_text.split("COMPLETE:")[1].split("\n")[0].lower()
+            # Extract founder info if not already set
+            if not state.get("founder_name") or not state.get("company_name"):
+                self._extract_founder_info(state, response_text)
             
-            # Extract insights
-            if "INSIGHTS:" in eval_text:
-                insights_section = eval_text.split("INSIGHTS:")[1].split("FOLLOW_UP_NEEDED:")[0]
-                insights = [line.strip("- ").strip() for line in insights_section.split("\n") if line.strip().startswith("-")]
-                state["key_insights"][current_stage].extend(insights)
+            # Update stage progress
+            current_stage = state["current_stage"]
+            if current_stage not in state["stage_progress"]:
+                state["stage_progress"][current_stage] = {"questions_asked": 0, "key_points": []}
             
-            # Determine if follow-up needed
-            follow_up_needed = "yes" in eval_text.split("FOLLOW_UP_NEEDED:")[1].split("\n")[0].lower()
+            # Analyze the pitch
+            try:
+                analysis = pitch_analyzer.analyze_pitch(response_text, state["conversation_id"])
+                analysis_summary = pitch_analyzer.get_analysis_summary(analysis)
+                
+                # Update state with analysis
+                state["pitch_analysis"] = analysis_summary
+                state["last_analysis_timestamp"] = datetime.now().isoformat()
+                state["analysis_history"].append(analysis_summary)
+                
+                # Add key insights from analysis
+                for element, data in analysis_summary["elements"].items():
+                    if data["score"] >= 80:  # Strong points
+                        state["key_insights"][current_stage].extend(data["strengths"])
+                    if data["score"] < 70:  # Areas for improvement
+                        state["key_insights"][current_stage].extend(data["weaknesses"])
+                
+            except Exception as e:
+                logger.error(f"Error analyzing pitch: {str(e)}")
             
-            # Update state
-            state["question_answered"] = complete
-            state["should_transition"] = complete and not follow_up_needed
-            
-            # Update founder info if in greeting stage
-            if current_stage == "greeting":
-                self._extract_founder_info(state, founder_response)
-            
-            logger.info(f"Response evaluation - Complete: {complete}, Follow-up needed: {follow_up_needed}")
+            state["question_answered"] = True
+            return state
             
         except Exception as e:
-            logger.error(f"Error evaluating response: {e}")
-            # Default to considering response complete to avoid getting stuck
-            state["question_answered"] = True
-            state["should_transition"] = True
-        
-        return state
+            logger.error(f"Error evaluating response: {str(e)}")
+            return state
     
     def _extract_founder_info(self, state: PitchWorkflowState, response: str) -> None:
         """Extract founder name and company from greeting stage"""
@@ -415,75 +402,82 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
         return state
     
     def _finalize_session(self, state: PitchWorkflowState) -> PitchWorkflowState:
-        """Finalize the pitch practice session"""
-        
-        # Generate final summary
-        summary_prompt = f"""
-        Generate a brief, encouraging summary of this pitch practice session:
-        
-        Founder: {state.get('founder_name', 'The founder')}
-        Company: {state.get('company_name', 'Their company')}
-        Stages completed: {list(state['key_insights'].keys())}
-        
-        Key insights gathered:
-        {json.dumps(state['key_insights'], indent=2)}
-        
-        Provide a warm, supportive summary that:
-        1. Acknowledges their participation
-        2. Highlights 2-3 key strengths
-        3. Offers encouragement for their pitch
-        4. Keeps it concise (3-4 sentences)
-        """
-        
+        """Finalize the session and prepare summary"""
         try:
-            summary_response = llm.invoke(summary_prompt)
-            final_message = summary_response.content.strip()
+            # Calculate session duration
+            session_start = datetime.fromisoformat(state["session_start"])
+            session_end = datetime.now()
+            duration = (session_end - session_start).total_seconds()
+            
+            # Prepare final analysis
+            final_analysis = None
+            if state["pitch_analysis"]:
+                final_analysis = state["pitch_analysis"]
+            
+            # Prepare session summary
+            summary = {
+                "session_id": state["conversation_id"],
+                "duration_seconds": duration,
+                "stages_completed": list(state["stage_progress"].keys()),
+                "questions_asked": len(state["questions_asked"]),
+                "key_insights": state["key_insights"],
+                "pitch_analysis": final_analysis,
+                "analysis_history": state["analysis_history"],
+                "recommendations": final_analysis["recommendations"] if final_analysis else []
+            }
+            
+            # Add summary to messages
+            summary_message = f"""
+            Session Summary:
+            - Duration: {duration/60:.1f} minutes
+            - Stages Completed: {', '.join(summary['stages_completed'])}
+            - Questions Asked: {summary['questions_asked']}
+            - Overall Score: {final_analysis['overall_score'] if final_analysis else 'N/A'}
+            
+            Key Recommendations:
+            {chr(10).join(f'- {rec}' for rec in summary['recommendations'])}
+            """
+            
+            state["messages"].append(AIMessage(content=summary_message))
+            state["workflow_complete"] = True
+            
+            return state
+            
         except Exception as e:
-            logger.error(f"Error generating summary: {e}")
-            final_message = f"Thank you for the great pitch practice session! You've covered all the key areas and I can see the passion and thought you've put into {state.get('company_name', 'your business')}. Keep refining your story and you'll do great with investors!"
-        
-        state["messages"].append(AIMessage(content=final_message))
-        state["workflow_complete"] = True
-        
-        logger.info(f"Finalized session for {state['conversation_id']}")
-        
-        return state
+            logger.error(f"Error finalizing session: {str(e)}")
+            return state
     
     def start_session(self, conversation_id: str, persona: str = "friendly") -> Dict[str, Any]:
         """Start a new pitch practice session"""
-        
-        if persona not in INVESTOR_PERSONAS:
-            raise ValueError(f"Unknown persona: {persona}")
-        
-        # Initialize state
-        initial_state = PitchWorkflowState(
-            messages=[],
-            conversation_id=conversation_id,
-            persona=persona,
-            founder_name="",
-            company_name="",
-            current_stage="",
-            stage_progress={},
-            should_transition=False,
-            workflow_complete=False,
-            current_question="",
-            question_answered=False,
-            session_start="",
-            stage_durations={},
-            questions_asked=[],
-            key_insights={}
-        )
-        
-        # Run initialization
-        config = {"configurable": {"thread_id": conversation_id}}
-        result = self.workflow.invoke(initial_state, config)
-        
-        # Return the greeting message
-        return {
-            "message": result["messages"][-1].content,
-            "stage": result["current_stage"],
-            "session_id": conversation_id
-        }
+        try:
+            # Initialize state
+            state = {
+                "conversation_id": conversation_id,
+                "persona": persona,
+                "messages": [],
+                "stage_progress": {},
+                "session_start": datetime.now().isoformat(),
+                "stage_durations": {},
+                "questions_asked": [],
+                "key_insights": {stage: [] for stage in PITCH_STAGES},
+                "pitch_analysis": None,
+                "last_analysis_timestamp": None,
+                "analysis_history": []
+            }
+            
+            # Run workflow
+            final_state = self.workflow.invoke(state)
+            
+            return {
+                "session_id": conversation_id,
+                "initial_message": final_state["messages"][0].content,
+                "persona": persona,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error starting session: {str(e)}")
+            raise
     
     def process_message(self, conversation_id: str, message: str) -> Dict[str, Any]:
         """Process a founder's message and return the investor's response"""
