@@ -99,7 +99,7 @@ class StageContext:
             self.key_info_gathered = {}
 
 class ImprovedStageAgent:
-    """Enhanced base class for stage-specific agents with single-question focus"""
+    """Base class for improved stage-specific agents with single-question focus"""
     
     def __init__(self, stage: PitchStage, persona: str, llm):
         self.stage = stage
@@ -159,7 +159,7 @@ class ImprovedStageAgent:
         return []
     
     def _create_chain(self) -> LLMChain:
-        """Create LangChain for this stage"""
+        """Create LangChain with response length enforcement"""
         return LLMChain(
             llm=self.llm,
             prompt=self.prompt,
@@ -168,28 +168,32 @@ class ImprovedStageAgent:
         )
     
     def respond(self, founder_input: str, context: dict) -> str:
-        """Generate response for this stage with single question focus"""
+        """Generate response with length enforcement"""
         try:
-            # Prepare context
-            chat_history = context.get("chat_history", "")
+            # Get initial response
+            response = self.chain.predict(
+                founder_input=founder_input,
+                chat_history=context.get('chat_history', '')
+            ).strip()
             
-            # Prepare input for the chain
-            input_dict = {
-                "founder_input": founder_input,
-                "chat_history": chat_history
-            }
+            # Enforce single question and length limit
+            if '?' in response:
+                # Split by question marks and take only the first question
+                questions = response.split('?')
+                response = questions[0].strip() + '?'
             
-            # Run the chain
-            response = self.chain.run(input_dict)
+            # Ensure response is under 15 words
+            words = response.split()
+            if len(words) > 15:
+                response = ' '.join(words[:15])
+                if not response.endswith('?'):
+                    response += '?'
             
-            # Track the question asked
-            self.questions_asked.append(response.strip())
-            
-            return response.strip()
+            return response
             
         except Exception as e:
-            logger.error(f"Error in {self.stage.value} agent response: {str(e)}", exc_info=True)
-            return "I apologize, but I encountered an error while processing your request. Could you please rephrase or try again later?"
+            logger.error(f"Error generating response: {str(e)}")
+            return "Could you elaborate on that?"
 
 class GreetingAgent(ImprovedStageAgent):
     """Specialized agent for greeting stage"""
@@ -197,31 +201,20 @@ class GreetingAgent(ImprovedStageAgent):
     def _create_stage_specific_prompt(self) -> PromptTemplate:
         template = f"""You are {self.persona_info['name']}, {self.persona_info['title']}.
         
-        PERSONALITY: {self.persona_info['personality']}
-        YOUR APPROACH: {self.persona_info['questioning_style']}
-        
-        GREETING STAGE OBJECTIVES:
-        1. Make the founder feel welcome and comfortable
-        2. Introduce yourself naturally
-        3. Get their name and company name
-        4. Ask ONE simple opening question to get them talking
-        
         CRITICAL INSTRUCTIONS:
-        - If this is the first interaction, introduce yourself warmly
-        - If they've introduced themselves, acknowledge their name and company
+        - Keep responses under 15 words
         - Ask ONLY ONE question at a time
-        - Keep the tone conversational and welcoming
-        - Match your personality perfectly
+        - Be direct and concise
+        - Match your {self.persona_info['personality']} personality
         
-        CONVERSATION SO FAR:
+        CONVERSATION:
         {{chat_history}}
         
-        FOUNDER'S MESSAGE: {{founder_input}}
+        FOUNDER: {{founder_input}}
         
-        Respond naturally. If you need basic info (name/company), ask for ONE piece at a time.
-        If you have their info, ask ONE engaging question to start the business discussion.
+        Respond with ONE brief question or greeting. Keep it under 15 words.
         
-        Your response:"""
+        Response:"""
         
         return PromptTemplate(
             input_variables=["chat_history", "founder_input"],
@@ -244,31 +237,20 @@ class ProblemSolutionAgent(ImprovedStageAgent):
     def _create_stage_specific_prompt(self) -> PromptTemplate:
         template = f"""You are {self.persona_info['name']}, {self.persona_info['title']}.
         
-        PERSONALITY: {self.persona_info['personality']}
-        YOUR APPROACH: {self.persona_info['questioning_style']}
-        
-        PROBLEM & SOLUTION STAGE OBJECTIVES:
-        1. Understand the core problem they're solving
-        2. Evaluate how their solution addresses the problem
-        3. Assess the significance and urgency of the problem
-        4. Understand solution effectiveness and uniqueness
-        
         CRITICAL INSTRUCTIONS:
-        - Ask ONLY ONE focused question at a time
-        - Don't move to next topic until current question is fully answered
-        - Dig deeper on vague or incomplete answers
-        - Stay focused on problem/solution fit
-        - Match your personality in questioning style
+        - Keep responses under 15 words
+        - Ask ONLY ONE question about problem or solution
+        - Be direct and specific
+        - Match your {self.persona_info['personality']} personality
         
-        CONVERSATION CONTEXT:
+        CONVERSATION:
         {{chat_history}}
         
-        FOUNDER'S RESPONSE: {{founder_input}}
+        FOUNDER: {{founder_input}}
         
-        Based on their response about the problem and solution, ask ONE specific follow-up question.
-        Focus on getting clear, detailed answers about either the problem or their solution.
+        Ask ONE specific question about their problem or solution. Keep it under 15 words.
         
-        Your response:"""
+        Response:"""
         
         return PromptTemplate(
             input_variables=["chat_history", "founder_input"],
@@ -308,30 +290,20 @@ class TargetMarketAgent(ImprovedStageAgent):
     def _create_stage_specific_prompt(self) -> PromptTemplate:
         template = f"""You are {self.persona_info['name']}, {self.persona_info['title']}.
         
-        PERSONALITY: {self.persona_info['personality']}
-        YOUR APPROACH: {self.persona_info['questioning_style']}
-        
-        TARGET MARKET STAGE OBJECTIVES:
-        1. Identify specific target customer segments
-        2. Understand market size and growth potential
-        3. Assess customer acquisition strategy
-        4. Evaluate market timing and trends
-        
         CRITICAL INSTRUCTIONS:
-        - Ask ONLY ONE focused question at a time about their target market
-        - Get specific details about customer segments
-        - Don't accept vague answers like "everyone needs this"
-        - Push for concrete market data and customer insights
-        - Match your personality in questioning approach
+        - Keep responses under 15 words
+        - Ask ONLY ONE question about market
+        - Be direct and specific
+        - Match your {self.persona_info['personality']} personality
         
-        CONVERSATION CONTEXT:
+        CONVERSATION:
         {{chat_history}}
         
-        FOUNDER'S RESPONSE: {{founder_input}}
+        FOUNDER: {{founder_input}}
         
-        Ask ONE specific question about their target market, customer segments, or market opportunity.
+        Ask ONE specific question about their target market. Keep it under 15 words.
         
-        Your response:"""
+        Response:"""
         
         return PromptTemplate(
             input_variables=["chat_history", "founder_input"],
@@ -371,30 +343,20 @@ class BusinessModelAgent(ImprovedStageAgent):
     def _create_stage_specific_prompt(self) -> PromptTemplate:
         template = f"""You are {self.persona_info['name']}, {self.persona_info['title']}.
         
-        PERSONALITY: {self.persona_info['personality']}
-        YOUR APPROACH: {self.persona_info['questioning_style']}
-        
-        BUSINESS MODEL STAGE OBJECTIVES:
-        1. Understand revenue generation strategy
-        2. Evaluate pricing model and strategy
-        3. Assess unit economics and scalability
-        4. Understand cost structure and margins
-        
         CRITICAL INSTRUCTIONS:
-        - Ask ONLY ONE focused question at a time about their business model
-        - Get specific details about how they make money
-        - Push for concrete numbers and economics
-        - Understand scalability and sustainability
-        - Match your personality in questioning style
+        - Keep responses under 15 words
+        - Ask ONLY ONE question about business model
+        - Be direct and specific
+        - Match your {self.persona_info['personality']} personality
         
-        CONVERSATION CONTEXT:
+        CONVERSATION:
         {{chat_history}}
         
-        FOUNDER'S RESPONSE: {{founder_input}}
+        FOUNDER: {{founder_input}}
         
-        Ask ONE specific question about their business model, pricing, or revenue strategy.
+        Ask ONE specific question about their business model. Keep it under 15 words.
         
-        Your response:"""
+        Response:"""
         
         return PromptTemplate(
             input_variables=["chat_history", "founder_input"],
@@ -560,30 +522,20 @@ class TeamAgent(ImprovedStageAgent):
     def _create_stage_specific_prompt(self) -> PromptTemplate:
         template = f"""You are {self.persona_info['name']}, {self.persona_info['title']}.
         
-        PERSONALITY: {self.persona_info['personality']}
-        YOUR APPROACH: {self.persona_info['questioning_style']}
-        
-        TEAM STAGE OBJECTIVES:
-        1. Understand team composition and experience
-        2. Evaluate founder-market fit and expertise
-        3. Assess team dynamics and culture
-        4. Understand hiring plans and team building
-        
         CRITICAL INSTRUCTIONS:
-        - Ask ONLY ONE focused question at a time about the team
-        - Understand both current team and future plans
-        - Evaluate relevant experience and expertise
-        - Assess team's ability to execute
-        - Match your personality in questioning approach
+        - Keep responses under 15 words
+        - Ask ONLY ONE question about team
+        - Be direct and specific
+        - Match your {self.persona_info['personality']} personality
         
-        CONVERSATION CONTEXT:
+        CONVERSATION:
         {{chat_history}}
         
-        FOUNDER'S RESPONSE: {{founder_input}}
+        FOUNDER: {{founder_input}}
         
-        Ask ONE specific question about their team, experience, or team building plans.
+        Ask ONE specific question about their team. Keep it under 15 words.
         
-        Your response:"""
+        Response:"""
         
         return PromptTemplate(
             input_variables=["chat_history", "founder_input"],
@@ -623,30 +575,20 @@ class FundingNeedsAgent(ImprovedStageAgent):
     def _create_stage_specific_prompt(self) -> PromptTemplate:
         template = f"""You are {self.persona_info['name']}, {self.persona_info['title']}.
         
-        PERSONALITY: {self.persona_info['personality']}
-        YOUR APPROACH: {self.persona_info['questioning_style']}
-        
-        FUNDING NEEDS STAGE OBJECTIVES:
-        1. Understand specific funding requirements
-        2. Evaluate use of funds and milestones
-        3. Assess financial projections and planning
-        4. Understand future funding strategy
-        
         CRITICAL INSTRUCTIONS:
-        - Ask ONLY ONE focused question at a time about funding
-        - Get specific numbers and detailed use of funds
-        - Understand timeline and milestones
-        - Evaluate financial planning and projections
-        - Match your personality in questioning style
+        - Keep responses under 15 words
+        - Ask ONLY ONE question about funding
+        - Be direct and specific
+        - Match your {self.persona_info['personality']} personality
         
-        CONVERSATION CONTEXT:
+        CONVERSATION:
         {{chat_history}}
         
-        FOUNDER'S RESPONSE: {{founder_input}}
+        FOUNDER: {{founder_input}}
         
-        Ask ONE specific question about their funding needs, use of funds, or financial planning.
+        Ask ONE specific question about their funding needs. Keep it under 15 words.
         
-        Your response:"""
+        Response:"""
         
         return PromptTemplate(
             input_variables=["chat_history", "founder_input"],
@@ -951,7 +893,7 @@ class ImprovedIntelligentAIAgent:
         
         # Generate initial greeting based on persona
         persona_info = INVESTOR_PERSONAS[persona]
-        initial_greeting = f"Hi! I'm {persona_info['name']}, {persona_info['title']}. I'm excited to learn about your business. Let's start with introductions - what's your name?"
+        initial_greeting = f"Hi! I'm {persona_info['name']}. What's your name?"
         
         # Add greeting to chat history
         context.chat_history.append({
