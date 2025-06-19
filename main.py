@@ -27,7 +27,10 @@ from app.services.langgraph_workflow import (
     start_pitch_session_with_message,
     process_pitch_message as handle_practice_message,
     get_pitch_workflow,
-    initialize_pitch_workflow
+    initialize_pitch_workflow,
+    generate_pitch_analysis_report,
+    end_pitch_session_with_analysis,
+    get_pitch_analytics
 )
 
 from app.services.intelligent_ai_agent_improved import (
@@ -95,12 +98,50 @@ logger.info(f"Session directory: {SESSION_DIR}")
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_PATH, "templates"))
 
+# Mount static files
 fastapi_app.mount("/static", StaticFiles(directory=os.path.join(BASE_PATH, "static")), name="static")
+
+def cleanup_old_audio_files(session_id: str, keep_count: int = 5):
+    """Clean up old audio files for a session, keeping only the most recent ones"""
+    try:
+        # Find all audio files for this session
+        audio_files = []
+        for filename in os.listdir(RESPONSE_DIR):
+            if filename.startswith(f"{session_id}_response_") and filename.endswith('.mp3'):
+                file_path = os.path.join(RESPONSE_DIR, filename)
+                # Extract timestamp from filename
+                try:
+                    timestamp_str = filename.replace(f"{session_id}_response_", "").replace('.mp3', '')
+                    timestamp = int(timestamp_str)
+                    audio_files.append((timestamp, file_path, filename))
+                except ValueError:
+                    # Skip files with invalid timestamp format
+                    continue
+        
+        # Sort by timestamp (newest first) and remove old files
+        audio_files.sort(key=lambda x: x[0], reverse=True)
+        
+        # Remove files beyond keep_count
+        for i, (timestamp, file_path, filename) in enumerate(audio_files):
+            if i >= keep_count:
+                try:
+                    os.remove(file_path)
+                    logger.info(f"Cleaned up old audio file: {filename}")
+                except OSError as e:
+                    logger.warning(f"Failed to remove old audio file {filename}: {e}")
+                    
+    except Exception as e:
+        logger.error(f"Error during audio cleanup: {e}")
 
 
 @fastapi_app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+@fastapi_app.get("/pitch-analysis/{session_id}", response_class=HTMLResponse)
+async def pitch_analysis_page(request: Request, session_id: str):
+    """Serve the pitch analysis page"""
+    return templates.TemplateResponse("pitch_analysis.html", {"request": request, "session_id": session_id})
 
 
 @fastapi_app.post("/pitch")
@@ -359,6 +400,93 @@ async def start_conversation(persona: str = "friendly"):
             }
         )
 
+@fastapi_app.get("/api/personas")
+async def get_personas():
+    """Get all available investor personas"""
+    try:
+        personas = {
+            "skeptical": {
+                "name": "Sarah Martinez",
+                "title": "Senior Partner at Venture Capital",
+                "description": "Analytical and thorough investor who asks tough questions about market validation, financial projections, and competitive advantages. Expects detailed data and proof points.",
+                "personality_traits": [
+                    "Detail-oriented",
+                    "Risk-averse", 
+                    "Data-driven",
+                    "Challenging"
+                ],
+                "focus_areas": [
+                    "Market validation",
+                    "Financial projections",
+                    "Competitive analysis",
+                    "Risk assessment"
+                ],
+                "typical_questions": [
+                    "What's your customer acquisition cost?",
+                    "How do you plan to defend against competitors?",
+                    "What are your unit economics?",
+                    "What evidence do you have of product-market fit?"
+                ]
+            },
+            "technical": {
+                "name": "Dr. Alex Chen",
+                "title": "CTO-turned-Investor at TechVentures",
+                "description": "Tech-focused investor with deep technical expertise. Interested in architecture, scalability, and technical innovation. Values technical depth and implementation details.",
+                "personality_traits": [
+                    "Technically savvy",
+                    "Innovation-focused",
+                    "Architecture-minded",
+                    "Implementation-oriented"
+                ],
+                "focus_areas": [
+                    "Technical architecture",
+                    "Scalability",
+                    "Innovation",
+                    "Development process"
+                ],
+                "typical_questions": [
+                    "How does your technology stack scale?",
+                    "What's your technical differentiation?",
+                    "How do you handle data security?",
+                    "What's your development methodology?"
+                ]
+            },
+            "friendly": {
+                "name": "Michael Thompson",
+                "title": "Angel Investor & Former Entrepreneur",
+                "description": "Supportive investor focused on founder journey and team dynamics. Emphasizes mentorship and long-term relationship building. Interested in founder-market fit.",
+                "personality_traits": [
+                    "Supportive",
+                    "Mentor-oriented",
+                    "Relationship-focused",
+                    "Encouraging"
+                ],
+                "focus_areas": [
+                    "Founder journey",
+                    "Team dynamics",
+                    "Vision and passion",
+                    "Market opportunity"
+                ],
+                "typical_questions": [
+                    "What inspired you to start this company?",
+                    "How did you identify this problem?",
+                    "What's your long-term vision?",
+                    "How can I help you succeed?"
+                ]
+            }
+        }
+        
+        return {
+            "success": True,
+            "personas": personas,
+            "total_count": len(personas),
+            "available_personas": list(personas.keys())
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting personas: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get personas")
+
 @fastapi_app.get("/api/tts/voices")
 async def get_tts_voices():
     """Get available TTS voices for all personas"""
@@ -550,6 +678,160 @@ async def process_pitch_message(
         logger.error(f"Error processing pitch message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
 
+@fastapi_app.get("/api/pitch/analytics/{session_id}")
+async def get_pitch_session_analytics(session_id: str):
+    """Get analytics for a pitch practice session
+    
+    Args:
+        session_id: Session identifier
+    
+    Returns:
+        Session analytics including duration, stages completed, insights, etc.
+    """
+    try:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        analytics = get_pitch_analytics(session_id)
+        
+        if "error" in analytics:
+            raise HTTPException(status_code=404, detail=analytics["error"])
+        
+        return {
+            "success": True,
+            "analytics": analytics
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pitch analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+
+@fastapi_app.get("/api/pitch/analysis/{session_id}")
+async def get_pitch_analysis_report(session_id: str):
+    """Generate comprehensive pitch analysis report
+    
+    Args:
+        session_id: Session identifier
+    
+    Returns:
+        Detailed pitch analysis with scores, strengths, weaknesses, recommendations
+    """
+    try:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        analysis = generate_pitch_analysis_report(session_id)
+        
+        if "error" in analysis:
+            raise HTTPException(status_code=404, detail=analysis["error"])
+        
+        return {
+            "success": True,
+            "analysis": analysis
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating pitch analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate analysis: {str(e)}")
+
+@fastapi_app.post("/api/pitch/end/{session_id}")
+async def end_pitch_session(session_id: str, reason: str = "user_ended"):
+    """End pitch session and generate comprehensive analysis
+    
+    Args:
+        session_id: Session identifier
+        reason: Reason for ending session (user_ended, completed, timeout, etc.)
+    
+    Returns:
+        Comprehensive pitch analysis report
+    """
+    try:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        analysis = end_pitch_session_with_analysis(session_id, reason)
+        
+        if "error" in analysis:
+            raise HTTPException(status_code=404, detail=analysis["error"])
+        
+        return {
+            "success": True,
+            "message": "Session ended successfully",
+            "analysis": analysis
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending pitch session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to end session: {str(e)}")
+
+@fastapi_app.get("/api/pitch/report/{session_id}")
+async def get_formatted_pitch_report(session_id: str):
+    """Get formatted pitch analysis report for frontend display
+    
+    Args:
+        session_id: Session identifier
+    
+    Returns:
+        Formatted analysis report optimized for frontend display
+    """
+    try:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        analysis = generate_pitch_analysis_report(session_id)
+        
+        if "error" in analysis:
+            raise HTTPException(status_code=404, detail=analysis["error"])
+        
+        # Format the analysis for better frontend consumption
+        formatted_report = {
+            "session_info": {
+                "session_id": analysis.get("session_id"),
+                "founder_name": analysis.get("founder_name", "Unknown"),
+                "company_name": analysis.get("company_name", "Unknown"),
+                "duration_minutes": analysis.get("session_duration_minutes", 0),
+                "completion_percentage": analysis.get("completion_percentage", 0),
+                "stages_completed": analysis.get("stages_completed", 0),
+                "total_stages": analysis.get("total_stages", 9),
+                "persona_used": analysis.get("persona_used", "Unknown"),
+                "generated_at": analysis.get("generated_at"),
+                "end_reason": analysis.get("end_reason", "analysis_requested")
+            },
+            "scores": {
+                "overall_score": analysis.get("overall_score", 0),
+                "confidence_level": analysis.get("confidence_level", "Unknown"),
+                "pitch_readiness": analysis.get("pitch_readiness", "Unknown"),
+                "stage_scores": analysis.get("stage_scores", {})
+            },
+            "feedback": {
+                "strengths": analysis.get("strengths", []),
+                "weaknesses": analysis.get("weaknesses", []),
+                "key_recommendations": analysis.get("key_recommendations", []),
+                "next_steps": analysis.get("next_steps", [])
+            },
+            "insights": {
+                "investor_perspective": analysis.get("investor_perspective", ""),
+                "summary": f"Completed {analysis.get('stages_completed', 0)} out of 9 pitch stages with an overall score of {analysis.get('overall_score', 0)}/100."
+            }
+        }
+        
+        return {
+            "success": True,
+            "report": formatted_report
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting formatted pitch report: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get report: {str(e)}")
+
 
 @sio.event
 async def connect(sid, environ):
@@ -659,7 +941,11 @@ async def text_message(sid, data):
             
             # Generate audio response and wait for completion
             if response["message"]:
-                response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_latest_response.mp3")
+                # Use timestamp to ensure unique audio files and prevent caching issues
+                timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+                audio_filename = f"{session_id}_response_{timestamp}.mp3"
+                response_audio_path = os.path.join(RESPONSE_DIR, audio_filename)
+                
                 # Run TTS in thread pool and wait for completion
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(
@@ -669,8 +955,14 @@ async def text_message(sid, data):
                     persona,
                     response_audio_path
                 )
-                response["audio_url"] = f"/download/{session_id}_latest_response.mp3"
+                response["audio_url"] = f"/download/{audio_filename}"
                 logger.info(f"Audio generated and ready at: {response_audio_path}")
+                
+                # Clean up old audio files for this session (keep only last 5)
+                try:
+                    cleanup_old_audio_files(session_id)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup old audio files: {cleanup_error}")
             
             # Send response
             await sio.emit("response", response, to=sid)

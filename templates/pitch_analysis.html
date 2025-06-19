@@ -1,107 +1,291 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Analysis Report</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
 
-{% block content %}
-<div class="min-h-screen bg-gray-100 py-8">
+<div class="min-h-screen py-8">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <!-- Header -->
         <div class="text-center mb-8">
-            <h1 class="text-3xl font-bold text-gray-900">Pitch Analysis</h1>
-            <p class="mt-2 text-gray-600">Detailed feedback and recommendations for your pitch</p>
+            <h1 class="text-4xl font-bold text-gray-900 mb-2">🎯 Pitch Analysis Report</h1>
+            <p class="text-gray-600">Comprehensive feedback and recommendations for your pitch</p>
+        </div>
+
+        <!-- Session Info Card -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Session Overview</h2>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <div class="text-sm text-gray-600">Founder</div>
+                    <div id="founderName" class="font-semibold text-gray-900">Loading...</div>
+                </div>
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <div class="text-sm text-gray-600">Company</div>
+                    <div id="companyName" class="font-semibold text-gray-900">Loading...</div>
+                </div>
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <div class="text-sm text-gray-600">Duration</div>
+                    <div id="sessionDuration" class="font-semibold text-blue-600">Loading...</div>
+                </div>
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <div class="text-sm text-gray-600">Completion</div>
+                    <div id="completionPercentage" class="font-semibold text-green-600">Loading...</div>
+                </div>
+                <div class="p-3 bg-gray-50 rounded-lg">
+                    <div class="text-sm text-gray-600">Stages</div>
+                    <div id="stagesCompleted" class="font-semibold text-purple-600">Loading...</div>
+                </div>
+            </div>
         </div>
 
         <!-- Overall Score -->
-        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
             <div class="text-center">
-                <h2 class="text-xl font-semibold text-gray-700 mb-4">Overall Score</h2>
-                <div class="inline-block p-8 bg-gradient-to-r from-green-400 to-blue-500 rounded-full">
-                    <span class="text-5xl font-bold text-white">{{ analysis.overall_score|round }}</span>
-                    <span class="text-white text-xl">/100</span>
+                <h2 class="text-2xl font-semibold text-gray-700 mb-6">Overall Performance</h2>
+                <div class="grid md:grid-cols-3 gap-6">
+                    <div class="text-center">
+                        <div class="inline-block p-8 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full mb-4">
+                            <span id="overallScore" class="text-5xl font-bold text-white">0</span>
+                            <span class="text-white text-xl">/100</span>
+                        </div>
+                        <div class="text-lg font-semibold text-gray-700">Overall Score</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="p-4 bg-green-50 rounded-lg mb-4">
+                            <div id="confidenceLevel" class="text-2xl font-bold text-green-600">Loading...</div>
+                        </div>
+                        <div class="text-lg font-semibold text-gray-700">Confidence Level</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="p-4 bg-indigo-50 rounded-lg mb-4">
+                            <div id="pitchReadiness" class="text-2xl font-bold text-indigo-600">Loading...</div>
+                        </div>
+                        <div class="text-lg font-semibold text-gray-700">Pitch Readiness</div>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Element Analysis -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            {% for element_name, element_data in analysis.elements.items() %}
+        <!-- Strengths and Weaknesses -->
+        <div class="grid md:grid-cols-2 gap-8 mb-8">
+            <!-- Strengths -->
             <div class="bg-white rounded-lg shadow-lg p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-semibold text-gray-900">{{ element_name|replace('_', ' ')|title }}</h3>
-                    <div class="text-2xl font-bold text-blue-600">{{ element_data.score|round }}</div>
-                </div>
-                
-                <div class="mb-4">
-                    <p class="text-gray-600">{{ element_data.feedback }}</p>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <!-- Strengths -->
-                    <div class="bg-green-50 rounded-lg p-4">
-                        <h4 class="font-semibold text-green-700 mb-2">Strengths</h4>
-                        <ul class="space-y-2">
-                            {% for strength in element_data.strengths %}
-                            <li class="flex items-start">
-                                <span class="text-green-500 mr-2">✓</span>
-                                <span class="text-sm text-green-700">{{ strength }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-
-                    <!-- Areas for Improvement -->
-                    <div class="bg-red-50 rounded-lg p-4">
-                        <h4 class="font-semibold text-red-700 mb-2">Areas for Improvement</h4>
-                        <ul class="space-y-2">
-                            {% for weakness in element_data.weaknesses %}
-                            <li class="flex items-start">
-                                <span class="text-red-500 mr-2">•</span>
-                                <span class="text-sm text-red-700">{{ weakness }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
+                <h3 class="text-xl font-semibold text-green-800 mb-4">✅ Strengths</h3>
+                <ul id="strengthsList" class="space-y-3">
+                    <li class="text-gray-500">Loading strengths...</li>
+                </ul>
             </div>
-            {% endfor %}
+
+            <!-- Areas for Improvement -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-xl font-semibold text-red-800 mb-4">❌ Areas for Improvement</h3>
+                <ul id="weaknessesList" class="space-y-3">
+                    <li class="text-gray-500">Loading areas for improvement...</li>
+                </ul>
+            </div>
         </div>
 
-        <!-- Recommendations -->
+        <!-- Stage Performance Chart -->
         <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <h2 class="text-xl font-semibold text-gray-900 mb-4">Recommendations</h2>
-            <ul class="space-y-3">
-                {% for recommendation in analysis.recommendations %}
-                <li class="flex items-start">
-                    <span class="text-blue-500 mr-2">→</span>
-                    <span class="text-gray-700">{{ recommendation }}</span>
-                </li>
-                {% endfor %}
-            </ul>
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">📊 Stage Performance</h2>
+            <div class="flex justify-center">
+                <canvas id="stageChart" class="max-w-lg max-h-96"></canvas>
+            </div>
         </div>
 
-        <!-- Progress Chart -->
-        <div class="bg-white rounded-lg shadow-lg p-6">
-            <h2 class="text-xl font-semibold text-gray-900 mb-4">Progress Over Time</h2>
-            <canvas id="progressChart" class="w-full h-96"></canvas>
+        <!-- Recommendations and Next Steps -->
+        <div class="grid md:grid-cols-2 gap-8 mb-8">
+            <!-- Key Recommendations -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-xl font-semibold text-blue-800 mb-4">🎯 Key Recommendations</h3>
+                <ul id="recommendationsList" class="space-y-2">
+                    <li class="text-gray-500">Loading recommendations...</li>
+                </ul>
+            </div>
+
+            <!-- Next Steps -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-xl font-semibold text-purple-800 mb-4">🚀 Next Steps</h3>
+                <ul id="nextStepsList" class="space-y-2">
+                    <li class="text-gray-500">Loading next steps...</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Investor Perspective -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">💼 Investor Perspective</h2>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <p id="investorPerspective" class="text-gray-700 italic">Loading investor perspective...</p>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="text-center space-x-4">
+            <button onclick="window.print()" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg shadow">
+                🖨️ Print Report
+            </button>
+            <button onclick="window.history.back()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg shadow">
+                ← Back to Session
+            </button>
+            <button onclick="window.location.href='/'" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg shadow">
+                🚀 Start New Session
+            </button>
         </div>
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Get the analysis data from the template
-    const analysis = {{ analysis|tojson }};
+// Load analysis data from API
+document.addEventListener('DOMContentLoaded', async function() {
+    const sessionId = getSessionIdFromUrl();
+    if (!sessionId) {
+        showError('No session ID provided');
+        return;
+    }
     
-    // Create the radar chart
-    const ctx = document.getElementById('progressChart').getContext('2d');
-    const labels = Object.keys(analysis.elements).map(l => l.replace('_', ' ').toUpperCase());
-    const scores = Object.values(analysis.elements).map(e => e.score);
+    try {
+        const response = await fetch(`/api/pitch/report/${sessionId}`);
+        const data = await response.json();
+        
+        if (data.success && data.report) {
+            displayAnalysisReport(data.report);
+        } else {
+            showError(data.error || 'Failed to load analysis report');
+        }
+    } catch (error) {
+        console.error('Error loading analysis:', error);
+        showError('Error loading analysis report');
+    }
+});
 
+function getSessionIdFromUrl() {
+    const pathParts = window.location.pathname.split('/');
+    return pathParts[pathParts.length - 1];
+}
+
+function displayAnalysisReport(report) {
+    // Update session info
+    document.getElementById('founderName').textContent = report.session_info.founder_name || 'Unknown';
+    document.getElementById('companyName').textContent = report.session_info.company_name || 'Unknown';
+    document.getElementById('sessionDuration').textContent = `${report.session_info.duration_minutes}m`;
+    document.getElementById('completionPercentage').textContent = `${report.session_info.completion_percentage}%`;
+    document.getElementById('stagesCompleted').textContent = `${report.session_info.stages_completed}/${report.session_info.total_stages}`;
+    
+    // Update scores
+    document.getElementById('overallScore').textContent = report.scores.overall_score;
+    document.getElementById('confidenceLevel').textContent = report.scores.confidence_level;
+    document.getElementById('pitchReadiness').textContent = report.scores.pitch_readiness;
+    
+    // Update strengths
+    const strengthsList = document.getElementById('strengthsList');
+    strengthsList.innerHTML = '';
+    if (report.feedback.strengths && report.feedback.strengths.length > 0) {
+        report.feedback.strengths.forEach(strength => {
+            const li = document.createElement('li');
+            li.className = 'flex items-start mb-3';
+            li.innerHTML = `
+                <span class="text-green-500 mr-2 mt-1">✓</span>
+                <div>
+                    <div class="font-semibold text-green-700">${strength.area} (${strength.score}/10)</div>
+                    <div class="text-sm text-green-600">${strength.description}</div>
+                </div>
+            `;
+            strengthsList.appendChild(li);
+        });
+    } else {
+        strengthsList.innerHTML = '<li class="text-gray-500">No specific strengths identified yet.</li>';
+    }
+    
+    // Update weaknesses
+    const weaknessesList = document.getElementById('weaknessesList');
+    weaknessesList.innerHTML = '';
+    if (report.feedback.weaknesses && report.feedback.weaknesses.length > 0) {
+        report.feedback.weaknesses.forEach(weakness => {
+            const li = document.createElement('li');
+            li.className = 'mb-4';
+            li.innerHTML = `
+                <div class="flex items-start">
+                    <span class="text-red-500 mr-2 mt-1">•</span>
+                    <div>
+                        <div class="font-semibold text-red-700">${weakness.area}</div>
+                        <div class="text-sm text-red-600 mb-1">${weakness.description}</div>
+                        ${weakness.improvement ? `
+                        <div class="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                            💡 <strong>Suggestion:</strong> ${weakness.improvement}
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+            weaknessesList.appendChild(li);
+        });
+    } else {
+        weaknessesList.innerHTML = '<li class="text-gray-500">No specific areas for improvement identified yet.</li>';
+    }
+    
+    // Update recommendations
+    const recommendationsList = document.getElementById('recommendationsList');
+    recommendationsList.innerHTML = '';
+    if (report.feedback.key_recommendations && report.feedback.key_recommendations.length > 0) {
+        report.feedback.key_recommendations.forEach(rec => {
+            const li = document.createElement('li');
+            li.className = 'flex items-start mb-2';
+            li.innerHTML = `
+                <span class="text-blue-500 mr-2">→</span>
+                <span class="text-blue-700">${rec}</span>
+            `;
+            recommendationsList.appendChild(li);
+        });
+    } else {
+        recommendationsList.innerHTML = '<li class="text-gray-500">No specific recommendations available yet.</li>';
+    }
+    
+    // Update next steps
+    const nextStepsList = document.getElementById('nextStepsList');
+    nextStepsList.innerHTML = '';
+    if (report.feedback.next_steps && report.feedback.next_steps.length > 0) {
+        report.feedback.next_steps.forEach(step => {
+            const li = document.createElement('li');
+            li.className = 'flex items-start mb-2';
+            li.innerHTML = `
+                <span class="text-purple-500 mr-2">🚀</span>
+                <span class="text-purple-700">${step}</span>
+            `;
+            nextStepsList.appendChild(li);
+        });
+    } else {
+        nextStepsList.innerHTML = '<li class="text-gray-500">No specific next steps available yet.</li>';
+    }
+    
+    // Update investor perspective
+    document.getElementById('investorPerspective').textContent = report.insights.investor_perspective || 'No investor perspective available yet.';
+    
+    // Create stage scores chart
+    if (report.scores.stage_scores) {
+        createStageScoresChart(report.scores.stage_scores);
+    }
+}
+
+function createStageScoresChart(stageScores) {
+    const ctx = document.getElementById('stageChart').getContext('2d');
+    const labels = Object.keys(stageScores).map(stage => 
+        stage.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
+    );
+    const scores = Object.values(stageScores);
+    
     new Chart(ctx, {
         type: 'radar',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Current Scores',
+                label: 'Stage Scores',
                 data: scores,
                 backgroundColor: 'rgba(99, 102, 241, 0.2)',
                 borderColor: 'rgb(99, 102, 241)',
@@ -115,9 +299,9 @@ document.addEventListener('DOMContentLoaded', function() {
             scales: {
                 r: {
                     beginAtZero: true,
-                    max: 100,
+                    max: 10,
                     ticks: {
-                        stepSize: 20
+                        stepSize: 2
                     }
                 }
             },
@@ -127,11 +311,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 title: {
                     display: true,
-                    text: 'Pitch Element Scores'
+                    text: 'Pitch Stage Performance'
                 }
             }
         }
     });
-});
+}
+
+function showError(message) {
+    document.body.innerHTML = `
+        <div class="min-h-screen flex items-center justify-center">
+            <div class="text-center">
+                <div class="text-6xl mb-4">❌</div>
+                <h1 class="text-2xl font-bold text-gray-900 mb-2">Error Loading Analysis</h1>
+                <p class="text-gray-600 mb-4">${message}</p>
+                <button onclick="window.history.back()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg">
+                    Go Back
+                </button>
+            </div>
+        </div>
+    `;
+}
 </script>
-{% endblock %} 
+
+</body>
+</html>

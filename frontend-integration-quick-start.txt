@@ -1,0 +1,317 @@
+FRONTEND INTEGRATION QUICK START GUIDE
+=====================================
+
+🚀 READY-TO-USE API ENDPOINTS FOR EXTERNAL FRONTEND
+===================================================
+
+BASE URL: https://ai-mock-pitching-427457295403.europe-west1.run.app/
+
+📋 COMPLETE INTEGRATION FLOW
+============================
+
+1. PERSONA SELECTION
+   GET /api/personas
+   Returns: All available investor personas with details
+
+2. WEBSOCKET CONNECTION
+   Connect to: wss://ai-mock-pitching-427457295403.europe-west1.run.app/socket.io
+   Events: text_message (send), response (receive)
+
+3. REAL-TIME CHAT
+   Send: text_message with {text, persona, session_id, system}
+   Receive: response with {message, audio_url, stage, complete}
+
+4. END SESSION & ANALYSIS
+   POST /api/pitch/end/{session_id}
+   GET /api/pitch/analysis/{session_id}
+
+🔌 QUICK SETUP COMMANDS
+======================
+
+# React Setup
+npm install socket.io-client axios
+# Import: import io from 'socket.io-client';
+
+# Vue Setup  
+npm install socket.io-client axios
+# Import: import io from 'socket.io-client';
+
+# Angular Setup
+npm install socket.io-client axios
+# Import: import io from 'socket.io-client';
+
+📡 ESSENTIAL API CALLS
+=====================
+
+1. LOAD PERSONAS:
+   fetch('https://ai-mock-pitching-427457295403.europe-west1.run.app/api/personas')
+   .then(res => res.json())
+   .then(data => console.log(data.personas))
+
+2. CONNECT WEBSOCKET:
+   const socket = io('https://ai-mock-pitching-427457295403.europe-west1.run.app/');
+   socket.on('connect', () => console.log('Connected'));
+
+3. SEND MESSAGE:
+   socket.emit('text_message', {
+     text: 'Hello, I am Alex from Vertex',
+     persona: 'skeptical',
+     session_id: 'session_' + Date.now(),
+     system: 'workflow'
+   });
+
+4. RECEIVE RESPONSE:
+   socket.on('response', (data) => {
+     console.log('AI:', data.message);
+     if (data.audio_url) {
+       playAudio('https://ai-mock-pitching-427457295403.europe-west1.run.app' + data.audio_url);
+     }
+   });
+
+5. END SESSION:
+   fetch(`http://localhost:8080/api/pitch/end/${sessionId}`, {
+     method: 'POST',
+     headers: {'Content-Type': 'application/json'},
+     body: JSON.stringify({reason: 'user_ended'})
+   })
+
+6. GET ANALYSIS:
+   fetch(`http://localhost:8080/api/pitch/analysis/${sessionId}`)
+   .then(res => res.json())
+   .then(data => console.log(data.analysis))
+
+🎯 MINIMAL WORKING EXAMPLE (React)
+=================================
+
+import React, { useState, useEffect } from 'react';
+import io from 'socket.io-client';
+
+function PitchApp() {
+  const [socket, setSocket] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [message, setMessage] = useState('');
+  const [responses, setResponses] = useState([]);
+
+  useEffect(() => {
+    const newSocket = io('http://localhost:8080');
+    setSocket(newSocket);
+    
+    newSocket.on('response', (data) => {
+      setResponses(prev => [...prev, data.message]);
+      if (data.audio_url) {
+        const audio = new Audio('http://localhost:8080' + data.audio_url);
+        audio.play();
+      }
+    });
+
+    return () => newSocket.close();
+  }, []);
+
+  const startSession = () => {
+    setSessionId('session_' + Date.now());
+  };
+
+  const sendMessage = () => {
+    if (socket && sessionId && message) {
+      socket.emit('text_message', {
+        text: message,
+        persona: 'skeptical',
+        session_id: sessionId,
+        system: 'workflow'
+      });
+      setMessage('');
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={startSession}>Start Session</button>
+      <input 
+        value={message} 
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="Type your message"
+      />
+      <button onClick={sendMessage}>Send</button>
+      <div>
+        {responses.map((resp, i) => <p key={i}>{resp}</p>)}
+      </div>
+    </div>
+  );
+}
+
+export default PitchApp;
+
+🎯 MINIMAL WORKING EXAMPLE (Vue)
+===============================
+
+<template>
+  <div>
+    <button @click="startSession">Start Session</button>
+    <input v-model="message" placeholder="Type your message" />
+    <button @click="sendMessage">Send</button>
+    <div>
+      <p v-for="(resp, i) in responses" :key="i">{{ resp }}</p>
+    </div>
+  </div>
+</template>
+
+<script>
+import io from 'socket.io-client';
+
+export default {
+  data() {
+    return {
+      socket: null,
+      sessionId: null,
+      message: '',
+      responses: []
+    };
+  },
+  
+  mounted() {
+    this.socket = io('http://localhost:8080');
+    
+    this.socket.on('response', (data) => {
+      this.responses.push(data.message);
+      if (data.audio_url) {
+        const audio = new Audio('http://localhost:8080' + data.audio_url);
+        audio.play();
+      }
+    });
+  },
+  
+  methods: {
+    startSession() {
+      this.sessionId = 'session_' + Date.now();
+    },
+    
+    sendMessage() {
+      if (this.socket && this.sessionId && this.message) {
+        this.socket.emit('text_message', {
+          text: this.message,
+          persona: 'skeptical',
+          session_id: this.sessionId,
+          system: 'workflow'
+        });
+        this.message = '';
+      }
+    }
+  }
+};
+</script>
+
+📊 API RESPONSE FORMATS
+======================
+
+PERSONAS RESPONSE:
+{
+  "success": true,
+  "personas": {
+    "skeptical": {
+      "name": "Sarah Martinez",
+      "title": "Senior Partner at Venture Capital",
+      "description": "Analytical and thorough investor...",
+      "personality_traits": ["Detail-oriented", "Risk-averse"],
+      "focus_areas": ["Market validation", "Financial projections"],
+      "typical_questions": ["What's your customer acquisition cost?"]
+    }
+  },
+  "total_count": 3,
+  "available_personas": ["skeptical", "technical", "friendly"]
+}
+
+WEBSOCKET RESPONSE:
+{
+  "message": "Hello Alex! Nice to meet you. Can you give me a brief overview of what Vertex does?",
+  "audio_url": "/download/session_123_response_456.mp3",
+  "stage": "introduction",
+  "complete": false,
+  "insights": {},
+  "type": "workflow"
+}
+
+ANALYSIS RESPONSE:
+{
+  "success": true,
+  "analysis": {
+    "overall_score": 75,
+    "completion_percentage": 80,
+    "pitch_readiness": "Good",
+    "session_duration_minutes": 15,
+    "strengths": [
+      {
+        "area": "Problem Definition",
+        "description": "Clear articulation of the problem"
+      }
+    ],
+    "weaknesses": [
+      {
+        "area": "Market Size",
+        "description": "Need more specific market data"
+      }
+    ],
+    "key_recommendations": [
+      "Provide specific market size data",
+      "Include customer testimonials"
+    ]
+  }
+}
+
+🔧 TROUBLESHOOTING
+=================
+
+1. CONNECTION ISSUES:
+   - Check if backend server is running on port 8080
+   - Verify CORS settings allow your frontend domain
+   - Test WebSocket connection in browser dev tools
+
+2. AUDIO NOT PLAYING:
+   - Check browser audio permissions
+   - Verify audio URL is accessible
+   - Add cache busting: audio.src = url + '?t=' + Date.now()
+
+3. NO RESPONSE FROM AI:
+   - Check session_id is being sent correctly
+   - Verify persona name is valid
+   - Check backend logs for errors
+
+4. API ERRORS:
+   - Verify endpoint URLs are correct
+   - Check request headers and body format
+   - Handle HTTP status codes properly
+
+🚀 PRODUCTION CHECKLIST
+======================
+
+□ Update API URLs for production environment
+□ Configure CORS for production domain
+□ Add error handling and loading states
+□ Implement audio controls (play/pause/volume)
+□ Add message history and pagination
+□ Set up proper state management
+□ Add unit and integration tests
+□ Configure environment variables
+□ Implement user authentication if needed
+□ Add analytics and monitoring
+
+📞 SUPPORT
+=========
+
+If you encounter issues:
+1. Check browser console for errors
+2. Verify backend server is running
+3. Test API endpoints with Postman/curl
+4. Check WebSocket connection status
+5. Review network requests in dev tools
+
+🎯 YOU'RE READY TO INTEGRATE!
+============================
+
+Your backend provides a complete API for:
+✅ Persona selection
+✅ Real-time WebSocket communication  
+✅ Audio response generation
+✅ Session management
+✅ Comprehensive pitch analysis
+
+The API is production-ready and can be integrated with any modern frontend framework!

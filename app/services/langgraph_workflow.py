@@ -8,6 +8,7 @@ import logging
 from typing import Dict, List, Optional, Any, TypedDict, Annotated
 from datetime import datetime
 import json
+import statistics
 
 # LangGraph imports
 from langgraph.graph import StateGraph, START, END
@@ -698,14 +699,32 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                     # Fallback: invoke the workflow with the final state
                     self.workflow.invoke(final_state, config)
                 
+                # Check if session is complete and generate analysis
+                is_complete = final_state.get("workflow_complete", False)
+                analysis = None
+                
+                if is_complete:
+                    # Generate comprehensive analysis for completed session
+                    try:
+                        analysis = self.generate_pitch_analysis(conversation_id)
+                        logger.info(f"Generated pitch analysis for completed session {conversation_id}")
+                    except Exception as analysis_error:
+                        logger.error(f"Failed to generate analysis: {analysis_error}")
+                
                 # Return the response
-                return {
+                response = {
                     "message": final_state["messages"][-1].content,
                     "stage": final_state["current_stage"],
-                    "complete": final_state.get("workflow_complete", False),
+                    "complete": is_complete,
                     "session_id": conversation_id,
                     "insights": final_state.get("key_insights", {})
                 }
+                
+                # Include analysis if session is complete
+                if analysis and "error" not in analysis:
+                    response["analysis"] = analysis
+                
+                return response
             else:
                 return {"error": "Session not found or expired"}
                 
@@ -749,6 +768,221 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
         except Exception as e:
             logger.error(f"Error getting analytics: {e}")
             return {"error": "Failed to get session analytics"}
+    
+    def generate_pitch_analysis(self, conversation_id: str) -> Dict[str, Any]:
+        """Generate comprehensive pitch analysis report"""
+        
+        config = {"configurable": {"thread_id": conversation_id}}
+        
+        try:
+            current_state = self.workflow.get_state(config)
+            if not current_state.values:
+                return {"error": "Session not found"}
+            
+            state = current_state.values
+            
+            # Get session analytics first
+            analytics = self.get_session_analytics(conversation_id)
+            if "error" in analytics:
+                return analytics
+            
+            # Generate comprehensive analysis using AI
+            analysis_prompt = f"""
+            Analyze this pitch practice session and provide a comprehensive evaluation report.
+            
+            SESSION DATA:
+            - Founder: {state.get('founder_name', 'Unknown')}
+            - Company: {state.get('company_name', 'Unknown')}
+            - Duration: {analytics['duration_minutes']} minutes
+            - Stages Completed: {len(analytics['completed_stages'])}/9
+            - Current Stage: {analytics['current_stage']}
+            - Total Questions Asked: {analytics['total_questions']}
+            - Session Complete: {analytics['workflow_complete']}
+            
+            STAGE INSIGHTS:
+            {json.dumps(analytics['key_insights'], indent=2)}
+            
+            CONVERSATION MESSAGES:
+            {self._format_conversation_for_analysis(state['messages'])}
+            
+            Please provide a detailed analysis in the following JSON format:
+            {{
+                "overall_score": <score out of 100>,
+                "confidence_level": "<Low/Medium/High>",
+                "pitch_readiness": "<Not Ready/Partially Ready/Ready/Investor Ready>",
+                "strengths": [
+                    {{"area": "<strength area>", "description": "<detailed description>", "score": <1-10>}},
+                    ...
+                ],
+                "weaknesses": [
+                    {{"area": "<weakness area>", "description": "<detailed description>", "improvement": "<specific improvement suggestion>"}},
+                    ...
+                ],
+                "stage_scores": {{
+                    "greeting": <score 1-10>,
+                    "problem_solution": <score 1-10>,
+                    "target_market": <score 1-10>,
+                    "business_model": <score 1-10>,
+                    "competition": <score 1-10>,
+                    "traction": <score 1-10>,
+                    "team": <score 1-10>,
+                    "funding_needs": <score 1-10>,
+                    "future_plans": <score 1-10>
+                }},
+                "key_recommendations": [
+                    "<specific actionable recommendation>",
+                    ...
+                ],
+                "investor_perspective": "<What an investor would think about this pitch>",
+                "next_steps": [
+                    "<immediate action item>",
+                    ...
+                ]
+            }}
+            
+            Base your analysis on:
+            1. Clarity and completeness of responses
+            2. Use of specific data and metrics
+            3. Market understanding and sizing
+            4. Competitive differentiation
+            5. Team credibility and experience
+            6. Financial projections and business model
+            7. Traction and validation
+            8. Vision and scalability
+            9. Communication effectiveness
+            10. Overall investor appeal
+            """
+            
+            try:
+                analysis_response = llm.invoke(analysis_prompt)
+                analysis_text = analysis_response.content
+                
+                # Try to parse JSON from the response
+                if "```json" in analysis_text:
+                    json_start = analysis_text.find("```json") + 7
+                    json_end = analysis_text.find("```", json_start)
+                    analysis_json = analysis_text[json_start:json_end].strip()
+                elif "{" in analysis_text and "}" in analysis_text:
+                    json_start = analysis_text.find("{")
+                    json_end = analysis_text.rfind("}") + 1
+                    analysis_json = analysis_text[json_start:json_end]
+                else:
+                    analysis_json = analysis_text
+                
+                analysis_data = json.loads(analysis_json)
+                
+                # Add session metadata
+                analysis_data.update({
+                    "session_id": conversation_id,
+                    "generated_at": datetime.now().isoformat(),
+                    "session_duration_minutes": analytics['duration_minutes'],
+                    "stages_completed": len(analytics['completed_stages']),
+                    "total_stages": 9,
+                    "completion_percentage": round((len(analytics['completed_stages']) / 9) * 100, 1),
+                    "founder_name": state.get('founder_name', ''),
+                    "company_name": state.get('company_name', ''),
+                    "persona_used": state['persona']
+                })
+                
+                return analysis_data
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse analysis JSON: {e}")
+                # Return a basic analysis if JSON parsing fails
+                return self._generate_basic_analysis(state, analytics)
+                
+        except Exception as e:
+            logger.error(f"Error generating pitch analysis: {e}")
+            return {"error": "Failed to generate pitch analysis"}
+    
+    def _format_conversation_for_analysis(self, messages: List[BaseMessage]) -> str:
+        """Format conversation messages for analysis"""
+        formatted = []
+        for i, msg in enumerate(messages[-20:]):  # Last 20 messages to avoid token limits
+            role = "Founder" if msg.__class__.__name__ == "HumanMessage" else "Investor"
+            content = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
+            formatted.append(f"{role}: {content}")
+        return "\n".join(formatted)
+    
+    def _generate_basic_analysis(self, state: Dict, analytics: Dict) -> Dict[str, Any]:
+        """Generate basic analysis when AI analysis fails"""
+        
+        stages_completed = len(analytics['completed_stages'])
+        total_insights = sum(len(insights) for insights in analytics['key_insights'].values())
+        
+        # Calculate basic scores
+        completion_score = (stages_completed / 9) * 40  # 40% for completion
+        insight_score = min(total_insights * 2, 30)     # 30% for insights quality
+        duration_score = min(analytics['duration_minutes'] / 30 * 20, 20)  # 20% for engagement
+        response_score = min(analytics['total_questions'] * 2, 10)  # 10% for responsiveness
+        
+        overall_score = int(completion_score + insight_score + duration_score + response_score)
+        
+        return {
+            "session_id": analytics['session_id'],
+            "generated_at": datetime.now().isoformat(),
+            "overall_score": overall_score,
+            "confidence_level": "Medium" if overall_score >= 60 else "Low",
+            "pitch_readiness": "Ready" if overall_score >= 80 else "Partially Ready" if overall_score >= 60 else "Not Ready",
+            "session_duration_minutes": analytics['duration_minutes'],
+            "stages_completed": stages_completed,
+            "total_stages": 9,
+            "completion_percentage": round((stages_completed / 9) * 100, 1),
+            "founder_name": state.get('founder_name', ''),
+            "company_name": state.get('company_name', ''),
+            "persona_used": state['persona'],
+            "strengths": [
+                {"area": "Engagement", "description": f"Completed {stages_completed} stages showing good engagement", "score": min(stages_completed, 10)},
+                {"area": "Detail", "description": f"Provided {total_insights} key insights across stages", "score": min(total_insights // 2, 10)}
+            ],
+            "weaknesses": [
+                {"area": "Completion", "description": f"Only completed {stages_completed}/9 stages", "improvement": "Complete all pitch stages for comprehensive feedback"}
+            ] if stages_completed < 9 else [],
+            "stage_scores": {stage: 7 if stage in analytics['completed_stages'] else 0 for stage in PITCH_STAGES},
+            "key_recommendations": [
+                "Complete all 9 pitch stages for comprehensive evaluation",
+                "Provide more specific metrics and data points",
+                "Practice articulating value proposition clearly"
+            ],
+            "investor_perspective": f"Based on {stages_completed} completed stages, this pitch shows {'good potential' if overall_score >= 60 else 'needs improvement'}.",
+            "next_steps": [
+                "Complete remaining pitch stages" if stages_completed < 9 else "Practice with different investor personas",
+                "Gather more specific metrics and data",
+                "Refine value proposition and differentiation"
+            ]
+        }
+    
+    def end_session_with_analysis(self, conversation_id: str, reason: str = "user_ended") -> Dict[str, Any]:
+        """End session and generate comprehensive analysis"""
+        
+        try:
+            # Generate the analysis
+            analysis = self.generate_pitch_analysis(conversation_id)
+            
+            if "error" not in analysis:
+                # Mark session as complete
+                config = {"configurable": {"thread_id": conversation_id}}
+                current_state = self.workflow.get_state(config)
+                
+                if current_state.values:
+                    current_state.values["workflow_complete"] = True
+                    current_state.values["end_reason"] = reason
+                    current_state.values["analysis_generated"] = True
+                    
+                    try:
+                        self.workflow.update_state(config, current_state.values)
+                    except Exception as update_error:
+                        logger.warning(f"Failed to update session state: {update_error}")
+                
+                # Add end reason to analysis
+                analysis["end_reason"] = reason
+                analysis["session_ended_at"] = datetime.now().isoformat()
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error ending session with analysis: {e}")
+            return {"error": "Failed to generate session analysis"}
 
 # Global workflow instance
 pitch_workflow = None
@@ -785,3 +1019,13 @@ def get_pitch_analytics(conversation_id: str) -> Dict[str, Any]:
     """Get analytics for a pitch practice session"""
     workflow = get_pitch_workflow()
     return workflow.get_session_analytics(conversation_id)
+
+def generate_pitch_analysis_report(conversation_id: str) -> Dict[str, Any]:
+    """Generate comprehensive pitch analysis report"""
+    workflow = get_pitch_workflow()
+    return workflow.generate_pitch_analysis(conversation_id)
+
+def end_pitch_session_with_analysis(conversation_id: str, reason: str = "user_ended") -> Dict[str, Any]:
+    """End pitch session and generate analysis report"""
+    workflow = get_pitch_workflow()
+    return workflow.end_session_with_analysis(conversation_id, reason)
