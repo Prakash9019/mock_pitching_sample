@@ -321,6 +321,102 @@ async def debug_conversations():
         logger.error(f"Error getting debug info: {str(e)}")
         return {"error": str(e)}
 
+@fastapi_app.get("/api/personas")
+async def get_personas():
+    """Get all available investor personas with their details"""
+    try:
+        from app.services.intelligent_ai_agent import INVESTOR_PERSONAS
+        from app.services.enhanced_text_to_speech import get_persona_voice_info
+        
+        personas_with_voice = {}
+        for persona_key, persona_data in INVESTOR_PERSONAS.items():
+            # Get voice information for this persona
+            voice_info = get_persona_voice_info(persona_key)
+            
+            personas_with_voice[persona_key] = {
+                "name": persona_data["name"],
+                "title": persona_data["title"],
+                "personality": persona_data["personality"],
+                "approach": persona_data["approach"],
+                "voice": {
+                    "name": voice_info["name"],
+                    "gender": voice_info["gender"],
+                    "language_code": voice_info["language_code"],
+                    "speaking_rate": voice_info["speaking_rate"],
+                    "pitch": voice_info["pitch"]
+                }
+            }
+        
+        return {
+            "status": "success",
+            "personas": personas_with_voice,
+            "available_personas": list(INVESTOR_PERSONAS.keys()),
+            "total_count": len(INVESTOR_PERSONAS)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting personas: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to retrieve personas",
+                "details": str(e),
+                "status": "error"
+            }
+        )
+
+@fastapi_app.get("/api/personas/{persona_name}")
+async def get_persona_details(persona_name: str):
+    """Get detailed information about a specific persona"""
+    try:
+        from app.services.intelligent_ai_agent import INVESTOR_PERSONAS
+        from app.services.enhanced_text_to_speech import get_persona_voice_info
+        
+        if persona_name not in INVESTOR_PERSONAS:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": f"Persona '{persona_name}' not found",
+                    "available_personas": list(INVESTOR_PERSONAS.keys()),
+                    "status": "error"
+                }
+            )
+        
+        persona_data = INVESTOR_PERSONAS[persona_name]
+        voice_info = get_persona_voice_info(persona_name)
+        
+        return {
+            "status": "success",
+            "persona": {
+                "key": persona_name,
+                "name": persona_data["name"],
+                "title": persona_data["title"],
+                "personality": persona_data["personality"],
+                "approach": persona_data["approach"],
+                "voice": {
+                    "name": voice_info["name"],
+                    "gender": voice_info["gender"],
+                    "language_code": voice_info["language_code"],
+                    "speaking_rate": voice_info["speaking_rate"],
+                    "pitch": voice_info["pitch"],
+                    "volume_gain_db": voice_info["volume_gain_db"]
+                }
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting persona details for {persona_name}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": f"Failed to retrieve details for persona '{persona_name}'",
+                "details": str(e),
+                "status": "error"
+            }
+        )
+
 # ===== NEW IMPROVED AI SYSTEMS ENDPOINTS =====
 
 @fastapi_app.post("/api/pitch/start")
