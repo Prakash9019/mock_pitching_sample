@@ -22,7 +22,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Local imports
 from .intelligent_ai_agent_improved import INVESTOR_PERSONAS, PitchStage, PITCH_STAGES
-from .pitch_analysis import PitchAnalyzer, PitchAnalysis
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -34,9 +33,6 @@ llm = ChatGoogleGenerativeAI(
     temperature=0.7,
     convert_system_message_to_human=True
 )
-
-# Initialize pitch analyzer
-pitch_analyzer = PitchAnalyzer(llm)
 
 class PitchWorkflowState(TypedDict):
     """State for the pitch practice workflow"""
@@ -64,11 +60,6 @@ class PitchWorkflowState(TypedDict):
     stage_durations: Dict[str, float]
     questions_asked: List[str]
     key_insights: Dict[str, List[str]]
-    
-    # Pitch Analysis
-    pitch_analysis: Optional[Dict[str, Any]]
-    last_analysis_timestamp: Optional[str]
-    analysis_history: List[Dict[str, Any]]
 
 class PitchWorkflowAgent:
     """LangGraph-based pitch practice workflow"""
@@ -114,7 +105,8 @@ class PitchWorkflowAgent:
             {
                 "transition": "transition_stage",
                 "continue": "generate_question",
-                "complete": "finalize_session"
+                "complete": "finalize_session",
+                "wait": END  # End workflow after first question, wait for founder response
             }
         )
         
@@ -125,6 +117,12 @@ class PitchWorkflowAgent:
     
     def _initialize_session(self, state: PitchWorkflowState) -> PitchWorkflowState:
         """Initialize a new pitch practice session"""
+        
+        # Check if session is already initialized (for continuing conversations)
+        if state.get("session_start") and state.get("current_stage"):
+            logger.info(f"Session already initialized for conversation {state['conversation_id']}, skipping initialization")
+            return state
+        
         logger.info(f"Initializing session for conversation {state['conversation_id']}")
         
         # Initialize session data
@@ -223,7 +221,49 @@ class PitchWorkflowAgent:
         
         questions_asked_count = state["stage_progress"][stage]["questions_asked"]
         
-        prompt = f"""You are {persona_info['name']}, {persona_info['title']}.
+        # Special handling for greeting stage to be more conversational
+        if stage == "greeting" and questions_asked_count == 0:
+            # Check if user has already provided some information in their first message
+            user_intro = ""
+            if state["messages"]:
+                # Look for the most recent human message
+                for msg in reversed(state["messages"]):
+                    if msg.__class__.__name__ == "HumanMessage":
+                        user_intro = msg.content
+                        break
+            
+            prompt = f"""You are {persona_info['name']}, {persona_info['title']}.
+
+PERSONALITY: {persona_info['personality']}
+QUESTIONING STYLE: {persona_info['questioning_style']}
+
+SITUATION: This is the beginning of a pitch meeting. The founder just said: "{user_intro}"
+
+INSTRUCTIONS:
+1. Respond naturally and conversationally to what they just said
+2. Acknowledge any information they've already provided (name, company, etc.)
+3. If they mentioned their name, greet them by name
+4. If they mentioned their company, acknowledge it and show interest
+5. Ask ONLY ONE focused question - don't ask multiple questions at once
+6. Keep it friendly but maintain your {persona_info['personality']} personality
+7. Make it feel like a real conversation, not an interrogation
+8. CRITICAL: Ask only ONE question, not 2-3-4 questions in the same response
+
+STAGE FOCUS: This is the GREETING stage. Focus ONLY on: name, company name, and brief introduction.
+Do NOT ask about revenue, metrics, traction, or detailed business questions yet - those come in later stages.
+
+EXAMPLES OF GOOD RESPONSES (ONE QUESTION EACH):
+- If they said "Hi, I'm Alex from Facebook": "Hello Alex! Great to meet you. So you're from Facebook - are you working on something new there, or is this a separate venture?"
+- If they said "Hello, I'm Sarah and I run TechCorp": "Hi Sarah! Nice to meet you. TechCorp sounds interesting - can you give me a brief overview of what TechCorp does?"
+- If they just said "Hello": "Hello! Great to meet you. Could you start by telling me your name and what company you're presenting?"
+- If they gave name and company: Ask for a brief introduction/overview of what the company does
+
+IMPORTANT: Your response should contain EXACTLY ONE question mark (?). Do not ask multiple questions.
+
+Generate a natural, conversational response with ONLY ONE question:"""
+        else:
+            # Standard prompt for other stages or follow-up questions
+            prompt = f"""You are {persona_info['name']}, {persona_info['title']}.
 
 PERSONALITY: {persona_info['personality']}
 QUESTIONING STYLE: {persona_info['questioning_style']}
@@ -235,66 +275,142 @@ CONVERSATION CONTEXT:
 {conversation_context}
 
 INSTRUCTIONS:
-1. Ask ONLY ONE focused question
+1. Ask ONLY ONE focused question - never ask multiple questions at once
 2. This is question #{questions_asked_count + 1} for this stage
-3. Build on previous responses but don't repeat questions
-4. Keep your personality and questioning style consistent
-5. If the founder seems to have answered incompletely, ask for clarification
-6. If you have enough information on this topic, prepare to transition
+3. Focus ONLY on the current stage objective - don't jump ahead to future stages
+4. Build on previous responses but don't repeat questions
+5. Keep your personality and questioning style consistent
+6. If the founder seems to have answered incompletely, ask for clarification
+7. If you have enough information on this topic, prepare to transition
+8. CRITICAL: Your response should contain EXACTLY ONE question mark (?). Do not ask multiple questions.
+
+STAGE FOCUS REMINDER:
+- If this is GREETING: Focus on name, company, brief intro only
+- If this is PROBLEM_SOLUTION: Focus on the problem they solve and their approach
+- If this is TRACTION: Then you can ask about metrics, revenue, growth
+- Don't mix stage objectives - stay focused on the current stage
 
 FOUNDER INFO:
 - Name: {state.get('founder_name', 'Not provided')}
 - Company: {state.get('company_name', 'Not provided')}
 
-Generate ONE specific question about {stage.replace('_', ' ')} that matches your personality:"""
+Generate ONE specific question about {stage.replace('_', ' ')} that matches your personality (only one question mark allowed):"""
         
         return prompt
     
     def _evaluate_founder_response(self, state: PitchWorkflowState) -> PitchWorkflowState:
-        """Evaluate the founder's response and update analysis"""
-        try:
-            # Get the latest message
-            latest_message = state["messages"][-1]
-            if not isinstance(latest_message, HumanMessage):
-                return state
-                
-            response_text = latest_message.content
-            
-            # Extract founder info if not already set
-            if not state.get("founder_name") or not state.get("company_name"):
-                self._extract_founder_info(state, response_text)
-            
-            # Update stage progress
-            current_stage = state["current_stage"]
-            if current_stage not in state["stage_progress"]:
-                state["stage_progress"][current_stage] = {"questions_asked": 0, "key_points": []}
-            
-            # Analyze the pitch
-            try:
-                analysis = pitch_analyzer.analyze_pitch(response_text, state["conversation_id"])
-                analysis_summary = pitch_analyzer.get_analysis_summary(analysis)
-                
-                # Update state with analysis
-                state["pitch_analysis"] = analysis_summary
-                state["last_analysis_timestamp"] = datetime.now().isoformat()
-                state["analysis_history"].append(analysis_summary)
-                
-                # Add key insights from analysis
-                for element, data in analysis_summary["elements"].items():
-                    if data["score"] >= 80:  # Strong points
-                        state["key_insights"][current_stage].extend(data["strengths"])
-                    if data["score"] < 70:  # Areas for improvement
-                        state["key_insights"][current_stage].extend(data["weaknesses"])
-                
-            except Exception as e:
-                logger.error(f"Error analyzing pitch: {str(e)}")
-            
-            state["question_answered"] = True
+        """Evaluate the founder's response and extract key insights"""
+        
+        # Get the latest founder message
+        latest_messages = state["messages"][-2:]  # Last 2 messages (question and response)
+        if len(latest_messages) < 2:
+            # During initialization, there's no response to evaluate yet
+            # Set flags to stop the workflow after generating the first question
+            state["question_answered"] = False
+            state["should_transition"] = False
+            state["workflow_complete"] = False
             return state
+        
+        founder_response = latest_messages[-1].content if latest_messages[-1].__class__.__name__ == "HumanMessage" else ""
+        
+        if not founder_response:
+            # No founder response yet, stop workflow after first question
+            state["question_answered"] = False
+            state["should_transition"] = False
+            state["workflow_complete"] = False
+            return state
+        
+        current_stage = state["current_stage"]
+        
+        # Special handling for greeting stage to extract founder info
+        if current_stage == "greeting":
+            # Extract founder name and company from their response
+            extraction_prompt = f"""
+            Extract the founder's name and company from this message:
+            "{founder_response}"
+            
+            Look for:
+            - Their name (e.g., "I'm Alex", "My name is Sarah", "This is John")
+            - Company name (e.g., "from Facebook", "I work at Google", "my company TechCorp")
+            
+            Format your response as:
+            NAME: [extracted name or "Not mentioned"]
+            COMPANY: [extracted company or "Not mentioned"]
+            """
+            
+            try:
+                extraction = llm.invoke(extraction_prompt)
+                extract_text = extraction.content
+                
+                # Parse extracted info
+                if "NAME:" in extract_text:
+                    name_line = extract_text.split("NAME:")[1].split("\n")[0].strip()
+                    if name_line and name_line.lower() != "not mentioned":
+                        state["founder_name"] = name_line
+                
+                if "COMPANY:" in extract_text:
+                    company_line = extract_text.split("COMPANY:")[1].split("\n")[0].strip()
+                    if company_line and company_line.lower() != "not mentioned":
+                        state["company_name"] = company_line
+                        
+            except Exception as e:
+                logger.error(f"Error extracting founder info: {e}")
+        
+        # Evaluate response completeness
+        evaluation_prompt = f"""
+        Evaluate this founder's response to the investor question:
+        
+        Question: {state['current_question']}
+        Response: {founder_response}
+        
+        1. Is the response complete and informative? (yes/no)
+        2. What key insights can be extracted? (list 2-3 bullet points)
+        3. Does this response warrant a follow-up question in the same topic? (yes/no)
+        
+        Format your response as:
+        COMPLETE: yes/no
+        INSIGHTS: 
+        - insight 1
+        - insight 2
+        FOLLOW_UP_NEEDED: yes/no
+        """
+        
+        try:
+            evaluation = llm.invoke(evaluation_prompt)
+            eval_text = evaluation.content
+            
+            # Parse evaluation
+            complete = "yes" in eval_text.split("COMPLETE:")[1].split("\n")[0].lower() if "COMPLETE:" in eval_text else True
+            
+            # Extract insights
+            if "INSIGHTS:" in eval_text:
+                insights_section = eval_text.split("INSIGHTS:")[1].split("FOLLOW_UP_NEEDED:")[0] if "FOLLOW_UP_NEEDED:" in eval_text else eval_text.split("INSIGHTS:")[1]
+                insights = [line.strip("- ").strip() for line in insights_section.split("\n") if line.strip().startswith("-")]
+                state["key_insights"][current_stage].extend(insights)
+            
+            # For greeting stage, always mark as answered if we got a response
+            if current_stage == "greeting" and founder_response.strip():
+                state["question_answered"] = True
+                # Extract founder info
+                self._extract_founder_info(state, founder_response)
+                logger.info(f"Greeting response received and processed")
+            else:
+                # For other stages, mark as answered if we got a substantive response
+                # This is more lenient to allow stage transitions
+                if founder_response.strip() and len(founder_response.strip()) > 10:
+                    state["question_answered"] = True
+                else:
+                    state["question_answered"] = complete
+            
+            logger.info(f"Response evaluation - Complete: {complete}, Question answered: {state['question_answered']}")
             
         except Exception as e:
-            logger.error(f"Error evaluating response: {str(e)}")
-            return state
+            logger.error(f"Error evaluating response: {e}")
+            # Default to considering response complete to avoid getting stuck
+            state["question_answered"] = True
+            logger.info(f"Defaulting to question_answered = True due to evaluation error")
+        
+        return state
     
     def _extract_founder_info(self, state: PitchWorkflowState, response: str) -> None:
         """Extract founder name and company from greeting stage"""
@@ -342,9 +458,22 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
         # Don't transition if we haven't asked minimum questions
         if questions_asked < min_required:
             state["should_transition"] = False
+            logger.info(f"Transition decision for {current_stage}: False (not enough questions: {questions_asked}/{min_required})")
             return state
         
-        # Check if we have enough information for this stage
+        # Special logic for greeting stage - transition if we have basic info
+        if current_stage == "greeting":
+            has_name = state.get("founder_name") and state["founder_name"] != "Not provided"
+            has_company = state.get("company_name") and state["company_name"] != "Not provided"
+            has_response = state.get("question_answered", False)
+            
+            # Transition if we have at least company info and a response
+            if (has_company or has_name) and has_response and questions_asked >= 1:
+                state["should_transition"] = True
+                logger.info(f"Greeting stage transition: True (name: {has_name}, company: {has_company}, answered: {has_response})")
+                return state
+        
+        # For other stages, check if we have enough information
         key_insights_count = len(state["key_insights"][current_stage])
         
         if key_insights_count >= 2 and state["question_answered"]:
@@ -358,6 +487,19 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
     
     def _should_transition_or_continue(self, state: PitchWorkflowState) -> str:
         """Determine the next step in the workflow"""
+        
+        # Check if this is initialization (no founder response yet)
+        latest_messages = state["messages"]
+        has_founder_response = False
+        
+        if len(latest_messages) >= 2:
+            # Check if the last message is from founder (HumanMessage)
+            last_msg = latest_messages[-1]
+            has_founder_response = last_msg.__class__.__name__ == "HumanMessage"
+        
+        # If no founder response yet, stop workflow after generating first question
+        if not has_founder_response and len(latest_messages) > 0:
+            return "wait"  # Stop workflow, wait for founder response
         
         # Check if workflow is complete
         if state["current_stage"] == "future_plans" and state["should_transition"]:
@@ -402,108 +544,167 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
         return state
     
     def _finalize_session(self, state: PitchWorkflowState) -> PitchWorkflowState:
-        """Finalize the session and prepare summary"""
+        """Finalize the pitch practice session"""
+        
+        # Generate final summary
+        summary_prompt = f"""
+        Generate a brief, encouraging summary of this pitch practice session:
+        
+        Founder: {state.get('founder_name', 'The founder')}
+        Company: {state.get('company_name', 'Their company')}
+        Stages completed: {list(state['key_insights'].keys())}
+        
+        Key insights gathered:
+        {json.dumps(state['key_insights'], indent=2)}
+        
+        Provide a warm, supportive summary that:
+        1. Acknowledges their participation
+        2. Highlights 2-3 key strengths
+        3. Offers encouragement for their pitch
+        4. Keeps it concise (3-4 sentences)
+        """
+        
         try:
-            # Calculate session duration
-            session_start = datetime.fromisoformat(state["session_start"])
-            session_end = datetime.now()
-            duration = (session_end - session_start).total_seconds()
-            
-            # Prepare final analysis
-            final_analysis = None
-            if state["pitch_analysis"]:
-                final_analysis = state["pitch_analysis"]
-            
-            # Prepare session summary
-            summary = {
-                "session_id": state["conversation_id"],
-                "duration_seconds": duration,
-                "stages_completed": list(state["stage_progress"].keys()),
-                "questions_asked": len(state["questions_asked"]),
-                "key_insights": state["key_insights"],
-                "pitch_analysis": final_analysis,
-                "analysis_history": state["analysis_history"],
-                "recommendations": final_analysis["recommendations"] if final_analysis else []
-            }
-            
-            # Add summary to messages
-            summary_message = f"""
-            Session Summary:
-            - Duration: {duration/60:.1f} minutes
-            - Stages Completed: {', '.join(summary['stages_completed'])}
-            - Questions Asked: {summary['questions_asked']}
-            - Overall Score: {final_analysis['overall_score'] if final_analysis else 'N/A'}
-            
-            Key Recommendations:
-            {chr(10).join(f'- {rec}' for rec in summary['recommendations'])}
-            """
-            
-            state["messages"].append(AIMessage(content=summary_message))
-            state["workflow_complete"] = True
-            
-            return state
-            
+            summary_response = llm.invoke(summary_prompt)
+            final_message = summary_response.content.strip()
         except Exception as e:
-            logger.error(f"Error finalizing session: {str(e)}")
-            return state
+            logger.error(f"Error generating summary: {e}")
+            final_message = f"Thank you for the great pitch practice session! You've covered all the key areas and I can see the passion and thought you've put into {state.get('company_name', 'your business')}. Keep refining your story and you'll do great with investors!"
+        
+        state["messages"].append(AIMessage(content=final_message))
+        state["workflow_complete"] = True
+        
+        logger.info(f"Finalized session for {state['conversation_id']}")
+        
+        return state
     
     def start_session(self, conversation_id: str, persona: str = "friendly") -> Dict[str, Any]:
         """Start a new pitch practice session"""
-        try:
-            # Initialize state
-            state = {
-                "conversation_id": conversation_id,
-                "persona": persona,
-                "messages": [],
-                "stage_progress": {},
-                "session_start": datetime.now().isoformat(),
-                "stage_durations": {},
-                "questions_asked": [],
-                "key_insights": {stage: [] for stage in PITCH_STAGES},
-                "pitch_analysis": None,
-                "last_analysis_timestamp": None,
-                "analysis_history": []
-            }
-            
-            # Run workflow
-            final_state = self.workflow.invoke(state)
-            
-            return {
-                "session_id": conversation_id,
-                "initial_message": final_state["messages"][0].content,
-                "persona": persona,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Error starting session: {str(e)}")
-            raise
+        
+        if persona not in INVESTOR_PERSONAS:
+            raise ValueError(f"Unknown persona: {persona}")
+        
+        # Initialize state
+        initial_state = PitchWorkflowState(
+            messages=[],
+            conversation_id=conversation_id,
+            persona=persona,
+            founder_name="",
+            company_name="",
+            current_stage="",
+            stage_progress={},
+            should_transition=False,
+            workflow_complete=False,
+            current_question="",
+            question_answered=False,
+            session_start="",
+            stage_durations={},
+            questions_asked=[],
+            key_insights={}
+        )
+        
+        # Run initialization
+        config = {"configurable": {"thread_id": conversation_id}}
+        result = self.workflow.invoke(initial_state, config)
+        
+        # Return the greeting message
+        return {
+            "message": result["messages"][-1].content,
+            "stage": result["current_stage"],
+            "session_id": conversation_id
+        }
+    
+    def start_session_with_message(self, conversation_id: str, persona: str, first_message: str) -> Dict[str, Any]:
+        """Start a new pitch practice session with the user's first message"""
+        
+        if persona not in INVESTOR_PERSONAS:
+            raise ValueError(f"Unknown persona: {persona}")
+        
+        # Initialize state with the user's first message
+        initial_state = PitchWorkflowState(
+            messages=[HumanMessage(content=first_message)],
+            conversation_id=conversation_id,
+            persona=persona,
+            founder_name="",
+            company_name="",
+            current_stage="",
+            stage_progress={},
+            should_transition=False,
+            workflow_complete=False,
+            current_question="",
+            question_answered=False,
+            session_start="",
+            stage_durations={},
+            questions_asked=[],
+            key_insights={}
+        )
+        
+        # Run initialization
+        config = {"configurable": {"thread_id": conversation_id}}
+        result = self.workflow.invoke(initial_state, config)
+        
+        # Return the response message
+        return {
+            "message": result["messages"][-1].content,
+            "stage": result["current_stage"],
+            "session_id": conversation_id,
+            "complete": result.get("workflow_complete", False),
+            "insights": result.get("key_insights", {})
+        }
     
     def process_message(self, conversation_id: str, message: str) -> Dict[str, Any]:
         """Process a founder's message and return the investor's response"""
         
         config = {"configurable": {"thread_id": conversation_id}}
         
-        # Add the founder's message to the state
-        human_message = HumanMessage(content=message)
-        
         # Get current state
         try:
             current_state = self.workflow.get_state(config)
             if current_state.values:
-                # Add the human message to existing state
+                # Add the founder's message to existing state
+                human_message = HumanMessage(content=message)
                 current_state.values["messages"].append(human_message)
                 
-                # Update the workflow state
-                result = self.workflow.invoke(current_state.values, config)
+                # Manually run the evaluation and transition steps
+                # 1. Evaluate the founder's response
+                evaluated_state = self._evaluate_founder_response(current_state.values)
+                
+                # 2. Decide on stage transition
+                transition_state = self._decide_stage_transition(evaluated_state)
+                
+                # 3. Check if we should transition or continue
+                next_action = self._should_transition_or_continue(transition_state)
+                
+                if next_action == "transition":
+                    # Transition to next stage
+                    transitioned_state = self._transition_to_next_stage(transition_state)
+                    # Assess the new stage
+                    assessed_state = self._assess_current_stage(transitioned_state)
+                    # Generate question for new stage
+                    final_state = self._generate_stage_question(assessed_state)
+                elif next_action == "continue":
+                    # Continue with current stage - generate new question
+                    final_state = self._generate_stage_question(transition_state)
+                else:
+                    # Complete or other action
+                    final_state = transition_state
+                
+                # Update the workflow state by invoking with the final state
+                # This ensures the state is properly persisted
+                try:
+                    self.workflow.update_state(config, final_state)
+                except Exception as update_error:
+                    logger.warning(f"State update failed, using invoke instead: {update_error}")
+                    # Fallback: invoke the workflow with the final state
+                    self.workflow.invoke(final_state, config)
                 
                 # Return the response
                 return {
-                    "message": result["messages"][-1].content,
-                    "stage": result["current_stage"],
-                    "complete": result.get("workflow_complete", False),
+                    "message": final_state["messages"][-1].content,
+                    "stage": final_state["current_stage"],
+                    "complete": final_state.get("workflow_complete", False),
                     "session_id": conversation_id,
-                    "insights": result.get("key_insights", {})
+                    "insights": final_state.get("key_insights", {})
                 }
             else:
                 return {"error": "Session not found or expired"}
@@ -569,6 +770,11 @@ def start_pitch_session(conversation_id: str, persona: str = "friendly") -> Dict
     """Start a new pitch practice session"""
     workflow = get_pitch_workflow()
     return workflow.start_session(conversation_id, persona)
+
+def start_pitch_session_with_message(conversation_id: str, persona: str, first_message: str) -> Dict[str, Any]:
+    """Start a new pitch practice session with the user's first message"""
+    workflow = get_pitch_workflow()
+    return workflow.start_session_with_message(conversation_id, persona, first_message)
 
 def process_pitch_message(conversation_id: str, message: str) -> Dict[str, Any]:
     """Process a message in the pitch practice session"""

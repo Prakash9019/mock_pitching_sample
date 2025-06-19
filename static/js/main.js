@@ -57,13 +57,36 @@
             updateStatus('Disconnected from server. Please refresh the page.', 'error');
           });
 
-          socket.on('ai_response', (data) => {
+          socket.on('session_started', (data) => {
+            console.log('Session started:', data);
+            updateStatus(`Session started with ${data.persona} persona`, 'success');
+          });
+
+          socket.on('error', (data) => {
+            console.error('Socket error:', data);
+            updateStatus(`Error: ${data.message}`, 'error');
+          });
+
+          socket.on('response', (data) => {
             try {
-              const blob = new Blob([data], { type: 'audio/mp3' });
-              const url = URL.createObjectURL(blob);
-              audioPlayer.src = url;
-              audioPlayer.play();
-              updateStatus('AI response received. Click "Start Speaking" to respond.', 'success');
+              console.log('Received response:', data);
+              
+              // Check if we have an audio URL
+              if (data.audio_url) {
+                // Construct full URL for audio
+                const audioUrl = `http://127.0.0.1:8080${data.audio_url}`;
+                console.log('Playing audio from:', audioUrl);
+                
+                audioPlayer.src = audioUrl;
+                audioPlayer.play().catch(error => {
+                  console.error('Error playing audio:', error);
+                  updateStatus('Error playing audio response', 'error');
+                });
+                
+                updateStatus(`AI: ${data.message}`, 'success');
+              } else {
+                updateStatus(`AI: ${data.message}`, 'success');
+              }
               
               // Hide the transcript display after receiving response
               setTimeout(() => {
@@ -73,8 +96,8 @@
               // Update conversation progress
               updateConversationProgress(personaSelect.value);
             } catch (error) {
-              console.error('Error playing AI response:', error);
-              updateStatus('Error playing AI response', 'error');
+              console.error('Error handling AI response:', error);
+              updateStatus('Error handling AI response', 'error');
             }
           });
         }

@@ -4,6 +4,8 @@ import os
 import json
 import uuid
 import tempfile
+import time
+import asyncio
 from datetime import datetime
 import shutil
 from typing import Optional, Union, BinaryIO
@@ -17,23 +19,25 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Import service modules
 from app.services.transcription import transcribe_audio
-from app.services.intelligent_ai_agent import get_conversation_statistics
 from app.services.enhanced_text_to_speech import convert_text_to_speech_with_persona
 
-# Import improved AI systems
-from app.services.integration_example import (
-    start_practice_session,
-    handle_practice_message,
-    get_practice_analytics,
-    get_pitch_manager
+# Import LangGraph workflow and improved AI agent
+from app.services.langgraph_workflow import (
+    start_pitch_session as start_practice_session,
+    start_pitch_session_with_message,
+    process_pitch_message as handle_practice_message,
+    get_pitch_workflow,
+    initialize_pitch_workflow
 )
 
-# Import pitch analysis
-from app.services.pitch_analysis import PitchAnalyzer
-from app.services.langgraph_workflow import get_pitch_analytics
+from app.services.intelligent_ai_agent_improved import (
+    start_improved_conversation,
+    generate_improved_response,
+    initialize_improved_agent,
+    improved_agent
+)
 
-# Import LLM
-from langchain_google_genai import ChatGoogleGenerativeAI
+# Integration example import removed - focusing on audio conversation
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -149,16 +153,44 @@ async def process_pitch(
         logger.error(f"Error processing pitch: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing pitch: {str(e)}")
 
-@fastapi_app.get("/download/{session_id}")
-async def download_response(session_id: str):
-    response_path = os.path.join(RESPONSE_DIR, f"{session_id}_response.mp3")
-    if not os.path.exists(response_path):
-        raise HTTPException(status_code=404, detail="Response audio not found")
+@fastapi_app.get("/download/{filename}")
+async def download_response(filename: str):
+    """Download audio response file
+    
+    Args:
+        filename: The audio filename (e.g., 'session_id_latest_response.mp3' or just 'session_id')
+    """
+    # Handle both full filename and session_id patterns
+    if filename.endswith('.mp3'):
+        # Full filename provided
+        file_path = os.path.join(RESPONSE_DIR, filename)
+    else:
+        # Just session_id provided, try different patterns
+        possible_paths = [
+            os.path.join(RESPONSE_DIR, f"{filename}_latest_response.mp3"),  # WebSocket pattern
+            os.path.join(RESPONSE_DIR, f"{filename}_response.mp3"),         # Original pattern
+        ]
+        
+        file_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                file_path = path
+                break
+        
+        if not file_path:
+            raise HTTPException(status_code=404, detail=f"Response audio not found for session: {filename}")
+    
+    # Check if the file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {filename}")
+    
     return FileResponse(
-        path=response_path,
-        filename=f"investor_response_{session_id}.mp3",
+        path=file_path,
+        filename=f"investor_response_{filename}",
         media_type="audio/mpeg"
     )
+
+
 
 @fastapi_app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
@@ -179,38 +211,99 @@ async def health_check():
         "version": "1.0.0"
     }
 
-# Global instance of the AI agent and analyzer
+# Memory stats endpoint removed - focusing on audio conversation
+
+@fastapi_app.get("/conversation/{session_id}/context")
+async def get_conversation_context(session_id: str):
+    """Get the full conversation context with LangChain enhancement."""
+    try:
+        if session_id in conversation_states:
+            conversation = conversation_states[session_id]
+            
+            # Get enhanced context if available
+            if hasattr(conversation, 'get_langchain_context'):
+                context = conversation.get_langchain_context()
+                using_langchain = conversation.use_langchain
+            else:
+                context = conversation.get_conversation_summary()
+                using_langchain = False
+            
+            return {
+                "conversation_id": session_id,
+                "context": context,
+                "using_langchain": using_langchain,
+                "persona": conversation.persona,
+                "message_count": len(conversation.conversation_history)
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    except Exception as e:
+        logger.error(f"Error getting conversation context: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting context: {str(e)}")
+
+@fastapi_app.get("/langchain-status")
+async def get_langchain_status():
+    """Check if LangChain is available and working."""
+    try:
+        # Import the module to check status
+        # Legacy code - LangChain integration is now handled in the intelligent agent
+        
+        status = {
+            "langchain_available": True,  # Now handled by intelligent agent
+            "google_api_key_set": bool(os.getenv("GEMINI_API_KEY")),
+            "active_conversations": len(conversation_states)
+        }
+        
+        if True:  # Enhanced AI agent is always available
+            # Count conversations using LangChain
+            langchain_conversations = sum(1 for conv in conversation_states.values() 
+                                        if hasattr(conv, 'use_langchain') and conv.use_langchain)
+            status["conversations_using_langchain"] = langchain_conversations
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Error checking LangChain status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error checking status: {str(e)}")
+
+# Minimal stats endpoint for frontend compatibility
+@fastapi_app.get("/api/conversation/{conversation_id}/stats")
+async def get_conversation_stats(conversation_id: str):
+    """Simple stats endpoint for frontend compatibility"""
+    return {
+        "status": "success",
+        "conversation_id": conversation_id,
+        "system": "workflow",
+        "data": {
+            "conversation_id": conversation_id,
+            "current_stage": "active",
+            "messages_exchanged": 0,
+            "last_activity": datetime.now().isoformat(),
+            "persona": "friendly"
+        }
+    }
+
+# Global instances
 ai_agent = None
-pitch_analyzer = None
+pitch_workflow = None
 
 # Global dictionary to store conversation states
 conversation_states = {}
 
 @fastapi_app.on_event("startup")
 async def startup_event():
-    """Initialize all AI agents when the application starts"""
-    global ai_agent, pitch_analyzer
+    """Initialize all AI agents and workflows when the application starts"""
+    global ai_agent, pitch_workflow
+    
     try:
-        from app.services.intelligent_ai_agent import IntelligentAIAgent
+        # Initialize the improved AI agent
+        initialize_improved_agent()
+        logger.info("Improved AI Agent initialized successfully")
         
-        # Initialize the LLM
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            temperature=0.7,
-            google_api_key=os.getenv("GEMINI_API_KEY")
-        )
-        
-        # Initialize the original AI agent (for backwards compatibility)
-        ai_agent = IntelligentAIAgent(llm)
-        logger.info("Original AI Agent initialized successfully")
-        
-        # Initialize the pitch analyzer
-        pitch_analyzer = PitchAnalyzer(llm)
-        logger.info("Pitch Analyzer initialized successfully")
-        
-        # Initialize the improved pitch manager and systems
-        manager = get_pitch_manager()
-        logger.info("Improved AI systems initialized successfully")
+        # Initialize the LangGraph workflow
+        initialize_pitch_workflow()
+        pitch_workflow = get_pitch_workflow()
+        logger.info("LangGraph workflow initialized successfully")
         
     except Exception as e:
         logger.error(f"Failed to initialize AI systems: {str(e)}", exc_info=True)
@@ -321,102 +414,6 @@ async def debug_conversations():
         logger.error(f"Error getting debug info: {str(e)}")
         return {"error": str(e)}
 
-@fastapi_app.get("/api/personas")
-async def get_personas():
-    """Get all available investor personas with their details"""
-    try:
-        from app.services.intelligent_ai_agent import INVESTOR_PERSONAS
-        from app.services.enhanced_text_to_speech import get_persona_voice_info
-        
-        personas_with_voice = {}
-        for persona_key, persona_data in INVESTOR_PERSONAS.items():
-            # Get voice information for this persona
-            voice_info = get_persona_voice_info(persona_key)
-            
-            personas_with_voice[persona_key] = {
-                "name": persona_data["name"],
-                "title": persona_data["title"],
-                "personality": persona_data["personality"],
-                "approach": persona_data["approach"],
-                "voice": {
-                    "name": voice_info["name"],
-                    "gender": voice_info["gender"],
-                    "language_code": voice_info["language_code"],
-                    "speaking_rate": voice_info["speaking_rate"],
-                    "pitch": voice_info["pitch"]
-                }
-            }
-        
-        return {
-            "status": "success",
-            "personas": personas_with_voice,
-            "available_personas": list(INVESTOR_PERSONAS.keys()),
-            "total_count": len(INVESTOR_PERSONAS)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting personas: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Failed to retrieve personas",
-                "details": str(e),
-                "status": "error"
-            }
-        )
-
-@fastapi_app.get("/api/personas/{persona_name}")
-async def get_persona_details(persona_name: str):
-    """Get detailed information about a specific persona"""
-    try:
-        from app.services.intelligent_ai_agent import INVESTOR_PERSONAS
-        from app.services.enhanced_text_to_speech import get_persona_voice_info
-        
-        if persona_name not in INVESTOR_PERSONAS:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": f"Persona '{persona_name}' not found",
-                    "available_personas": list(INVESTOR_PERSONAS.keys()),
-                    "status": "error"
-                }
-            )
-        
-        persona_data = INVESTOR_PERSONAS[persona_name]
-        voice_info = get_persona_voice_info(persona_name)
-        
-        return {
-            "status": "success",
-            "persona": {
-                "key": persona_name,
-                "name": persona_data["name"],
-                "title": persona_data["title"],
-                "personality": persona_data["personality"],
-                "approach": persona_data["approach"],
-                "voice": {
-                    "name": voice_info["name"],
-                    "gender": voice_info["gender"],
-                    "language_code": voice_info["language_code"],
-                    "speaking_rate": voice_info["speaking_rate"],
-                    "pitch": voice_info["pitch"],
-                    "volume_gain_db": voice_info["volume_gain_db"]
-                }
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting persona details for {persona_name}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": f"Failed to retrieve details for persona '{persona_name}'",
-                "details": str(e),
-                "status": "error"
-            }
-        )
-
 # ===== NEW IMPROVED AI SYSTEMS ENDPOINTS =====
 
 @fastapi_app.post("/api/pitch/start")
@@ -478,7 +475,9 @@ async def start_pitch_practice(
 async def process_pitch_message(
     session_id: str,
     message: str,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    system: str = "workflow",
+    persona: str = "friendly"
 ):
     """Process a founder's message in the pitch practice session
     
@@ -486,6 +485,8 @@ async def process_pitch_message(
         session_id: Session identifier
         message: Founder's message/response
         background_tasks: For generating audio response
+        system: Which AI system to use ('workflow' or 'improved')
+        persona: Investor persona for TTS generation
     
     Returns:
         Investor's response with session info
@@ -494,201 +495,61 @@ async def process_pitch_message(
         if not session_id or not message:
             raise HTTPException(status_code=400, detail="session_id and message are required")
         
-        # Process the message
-        response_data = handle_practice_message(session_id, message)
-        
-        if "error" in response_data:
-            raise HTTPException(status_code=404, detail=response_data["error"])
-        
-        # Generate audio response in background if system supports it
-        investor_response = response_data.get("message", "")
-        if investor_response:
-            # Determine persona from session (you might want to store this separately)
-            session_analytics = get_practice_analytics(session_id)
-            persona = session_analytics.get("persona", "friendly")
+        # Process the message using the appropriate system
+        if system == "improved":
+            # Use the improved AI agent
+            response_data = generate_improved_response(session_id, message)
+            investor_response = response_data.get("response", "")
             
-            # Generate audio response
+            # Format response to match expected structure
+            formatted_response = {
+                "message": investor_response,
+                "stage": response_data.get("current_stage"),
+                "complete": response_data.get("is_complete", False),
+                "type": "improved",
+                "insights": {
+                    "key_points": response_data.get("key_points", []),
+                    "suggestions": response_data.get("suggestions", [])
+                }
+            }
+        else:
+            # Use the LangGraph workflow
+            response_data = handle_practice_message(session_id, message)
+            if "error" in response_data:
+                raise HTTPException(status_code=404, detail=response_data["error"])
+            
+            investor_response = response_data.get("message", "")
+            formatted_response = response_data
+        
+        # Generate audio response in background
+        if investor_response:
             response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_latest_response.mp3")
             background_tasks.add_task(
                 convert_text_to_speech_with_persona,
                 investor_response,
-                response_audio_path,
-                persona
+                persona,
+                response_audio_path
             )
         
-        logger.info(f"Processed message for session {session_id}: {message[:50]}...")
+        logger.info(f"Processed message for {system} session {session_id}")
         
         return {
             "success": True,
             "message": investor_response,
             "session_id": session_id,
-            "stage": response_data.get("stage"),
-            "complete": response_data.get("complete", False),
-            "insights": response_data.get("insights", {}),
-            "type": response_data.get("type"),
+            "stage": formatted_response.get("stage"),
+            "complete": formatted_response.get("complete", False),
+            "insights": formatted_response.get("insights", {}),
+            "type": formatted_response.get("type", system),
             "audio_url": f"/download/{session_id}_latest_response.mp3" if investor_response else None
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing pitch message: {str(e)}")
+        logger.error(f"Error processing pitch message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
 
-@fastapi_app.get("/api/pitch/analytics/{session_id}")
-async def get_pitch_session_analytics(session_id: str):
-    """Get comprehensive analytics for a pitch practice session
-    
-    Args:
-        session_id: Session identifier
-    
-    Returns:
-        Detailed session analytics and insights
-    """
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
-        
-        analytics = get_practice_analytics(session_id)
-        
-        if "error" in analytics:
-            raise HTTPException(status_code=404, detail=analytics["error"])
-        
-        logger.info(f"Retrieved analytics for session {session_id}")
-        
-        return {
-            "success": True,
-            "analytics": analytics
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting pitch analytics: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
-
-@fastapi_app.get("/api/pitch/sessions/active")
-async def get_active_pitch_sessions():
-    """Get all active pitch practice sessions
-    
-    Returns:
-        List of active sessions with basic info
-    """
-    try:
-        manager = get_pitch_manager()
-        active_sessions = []
-        
-        for session_id, session_info in manager.active_sessions.items():
-            try:
-                analytics = get_practice_analytics(session_id)
-                if "error" not in analytics:
-                    active_sessions.append({
-                        "session_id": session_id,
-                        "type": session_info.get("type"),
-                        "persona": session_info.get("persona"),
-                        "founder_name": analytics.get("founder_name", ""),
-                        "company_name": analytics.get("company_name", ""),
-                        "current_stage": analytics.get("current_stage"),
-                        "duration_minutes": analytics.get("duration_minutes", 0)
-                    })
-            except Exception as e:
-                logger.warning(f"Error getting info for session {session_id}: {e}")
-                continue
-        
-        return {
-            "success": True,
-            "active_sessions": active_sessions,
-            "total_sessions": len(active_sessions)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting active sessions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get active sessions: {str(e)}")
-
-@fastapi_app.post("/api/pitch/compare")
-async def compare_ai_systems(
-    test_messages: list = None
-):
-    """Compare the performance of different AI systems with the same conversation
-    
-    Args:
-        test_messages: List of test messages to send to both systems
-    
-    Returns:
-        Comparison results between improved agent and workflow systems
-    """
-    try:
-        # Default test conversation if none provided
-        if not test_messages:
-            test_messages = [
-                "Hi, I'm Alex and my startup is GreenTech Solutions",
-                "We're solving climate change by helping companies reduce their carbon footprint",
-                "Our target market is mid-size companies that want to go carbon neutral",
-                "We make money through SaaS subscriptions and consulting services"
-            ]
-        
-        manager = get_pitch_manager()
-        comparison_results = manager.compare_systems(test_messages)
-        
-        if "error" in comparison_results:
-            raise HTTPException(status_code=500, detail=comparison_results["error"])
-        
-        logger.info("Completed AI systems comparison")
-        
-        return {
-            "success": True,
-            "comparison": comparison_results,
-            "test_messages": test_messages
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error comparing AI systems: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to compare systems: {str(e)}")
-
-# ===== END OF NEW ENDPOINTS =====
-
-@fastapi_app.get("/api/pitch/status")
-async def get_pitch_systems_status():
-    """Get the status of all pitch practice systems
-    
-    Returns:
-        Status of improved agent and LangGraph workflow systems
-    """
-    try:
-        manager = get_pitch_manager()
-        
-        # Test both systems quickly
-        status = {
-            "success": True,
-            "systems": {
-                "improved_agent": {
-                    "available": manager.improved_agent is not None,
-                    "initialized": True if manager.improved_agent else False
-                },
-                "langgraph_workflow": {
-                    "available": manager.workflow_agent is not None,
-                    "initialized": True if manager.workflow_agent else False
-                }
-            },
-            "active_sessions": len(manager.active_sessions),
-            "supported_personas": ["friendly", "skeptical", "technical"],
-            "supported_systems": ["improved", "workflow"]
-        }
-        
-        return status
-        
-    except Exception as e:
-        logger.error(f"Error getting pitch systems status: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "systems": {
-                "improved_agent": {"available": False, "initialized": False},
-                "langgraph_workflow": {"available": False, "initialized": False}
-            }
-        }
 
 @sio.event
 async def connect(sid, environ):
@@ -696,133 +557,176 @@ async def connect(sid, environ):
 
 @sio.event
 async def text_message(sid, data):
-    """Handle real-time transcribed text messages"""
+    """Handle real-time transcribed text messages
+    
+    Args:
+        sid: Socket.IO session ID
+        data: Message data (can be string or dict with text, system, persona)
+    """
     try:
-        global ai_agent, pitch_analyzer
+        logger.info(f"Received message from {sid}")
         
-        if ai_agent is None or pitch_analyzer is None:
-            logger.error("AI Agent or Pitch Analyzer not initialized")
-            await sio.emit("error", {"message": "AI systems not initialized"}, to=sid)
-            return
-            
-        logger.info(f"Received text message from {sid}")
-        
-        # Extract text and persona from the incoming message
+        # Extract message data
         if isinstance(data, dict):
-            transcript_text = data.get('text', '')
-            persona = data.get('persona', 'skeptical')
+            message_text = data.get('text', '').strip()
+            system = data.get('system', 'workflow')
+            persona = data.get('persona', 'friendly')
+            session_id = data.get('session_id', sid)  # Use provided session_id or fallback to sid
         else:
-            transcript_text = str(data)
-            persona = 'skeptical'
+            # Backward compatibility
+            message_text = str(data).strip()
+            system = 'workflow'
+            persona = 'friendly'
+            session_id = sid
         
-        if not transcript_text.strip():
-            logger.warning("Received empty text message")
+        if not message_text:
+            logger.warning("Received empty message")
+            await sio.emit("error", {"message": "Empty message received"}, to=sid)
             return
-            
-        logger.info(f"Processing text: {transcript_text[:100]}...")
         
-        # Generate response using the AI agent
+        logger.info(f"Processing message for {session_id} using {system} system")
+        
         try:
-            # First, check if we have a conversation, start one if not
-            try:
-                # Check if this is the first message in a new conversation
-                is_new_conversation = False
-                try:
-                    ai_agent.conversations[sid]
-                except (KeyError, ValueError):
-                    logger.info(f"Starting new conversation for {sid} with {persona} persona")
-                    await sio.emit("status", {"message": "Starting new conversation..."}, to=sid)
-                    ai_agent.start_conversation(sid, persona)
-                    is_new_conversation = True
+            # Check if we need to start a new session
+            is_new_session = False
+            
+            if system == "improved":
+                # Check if improved agent is available
+                if not improved_agent:
+                    raise Exception("Improved AI agent not initialized")
                 
-                # Process the user's message
-                investor_reply = ai_agent.generate_response(sid, transcript_text)
+                # Check if conversation exists
+                if not hasattr(improved_agent, 'conversations') or session_id not in improved_agent.conversations:
+                    logger.info(f"Starting new improved conversation for {session_id}")
+                    improved_agent.start_conversation(session_id, persona)
+                    is_new_session = True
                 
-                # If this was the first message, use a more contextual greeting
-                if is_new_conversation:
-                    if any(word in transcript_text.lower() for word in ["i am", "i'm", "my name is"]):
-                        pass
-                    else:
-                        investor_reply = f"Hello! I'm your AI investor. {investor_reply}"
+                # Process message with improved agent
+                response_data = generate_improved_response(session_id, message_text)
                 
-                # Send audio response immediately
-                logger.info("Converting response to speech with persona-specific voice...")
-                audio_data = convert_text_to_speech_with_persona(investor_reply, persona)
+                # Format response
+                response = {
+                    "message": response_data.get("response", ""),
+                    "stage": response_data.get("current_stage", "introduction"),
+                    "complete": response_data.get("is_complete", False),
+                    "insights": {
+                        "suggestions": response_data.get("suggestions", []),
+                        "key_points": response_data.get("key_points", [])
+                    },
+                    "type": "improved"
+                }
                 
-                if not audio_data:
-                    raise ValueError("Failed to generate audio response")
+            else:  # Default to workflow
+                # Check if workflow is available
+                if not pitch_workflow:
+                    raise Exception("LangGraph workflow not initialized")
+                
+                # Check if this is a new session by checking if we have the session in memory
+                # For simplicity, we'll treat each WebSocket connection as potentially new
+                # and let the workflow handle session state internally
+                
+                # Try to process the message - if session doesn't exist, it will return an error
+                logger.info(f"Attempting to process message with existing session: {session_id}")
+                response_data = handle_practice_message(session_id, message_text)
+                logger.info(f"Response from handle_practice_message: {response_data}")
+                
+                # Check if we got an error response (session doesn't exist)
+                if isinstance(response_data, dict) and "error" in response_data:
+                    # Session doesn't exist, start a new one with the user's message
+                    logger.info(f"Starting new workflow session with message for {session_id}: {response_data.get('error')}")
+                    response_data = start_pitch_session_with_message(session_id, persona, message_text)
+                    is_new_session = True
+                    logger.info(f"Session started with message: {response_data}")
                     
-                logger.info(f"Generated {len(audio_data)} bytes of audio data")
+                    # If we still get an error, fall back to greeting
+                    if isinstance(response_data, dict) and "error" in response_data:
+                        logger.warning(f"Still getting error after starting session with message: {response_data.get('error')}")
+                        response_data = {
+                            "message": "Hello! I'm excited to hear your pitch. Please introduce yourself and your company.",
+                            "stage": "greeting",
+                            "complete": False,
+                            "insights": {}
+                        }
                 
-                # Send the audio data directly to the client
-                await sio.emit("ai_response", audio_data, to=sid)
-                
-                # Process analysis in the background
-                async def process_analysis():
-                    try:
-                        # Generate quick analysis using the global analyzer
-                        analysis = pitch_analyzer.analyze_pitch(transcript_text, session_id=sid)
-                        
-                        # Get analysis summary for API response
-                        analysis_summary = pitch_analyzer.get_analysis_summary(analysis)
-                        
-                        # Send analysis update
-                        await sio.emit("analysis_update", {
-                            "analysis": {
-                                "overall_score": analysis_summary["overall_score"],
-                                "key_insights": [
-                                    f"Strong {name}: {elem['feedback']}"
-                                    for name, elem in analysis_summary["elements"].items()
-                                    if elem["score"] >= 80
-                                ][:3]
-                            }
-                        }, to=sid)
-                    except Exception as e:
-                        logger.error(f"Error in background analysis: {str(e)}")
-                        # Don't send error to client since this is background processing
-                
-                # Start background analysis
-                import asyncio
-                asyncio.create_task(process_analysis())
-                
-            except ValueError as ve:
-                logger.error(f"Error in conversation handling: {str(ve)}")
-                raise
+                # Format response
+                response = {
+                    "message": response_data.get("message", ""),
+                    "stage": response_data.get("stage", "introduction"),
+                    "complete": response_data.get("complete", False),
+                    "insights": response_data.get("insights", {}),
+                    "type": "workflow"
+                }
+            
+            # Generate audio response and wait for completion
+            if response["message"]:
+                response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_latest_response.mp3")
+                # Run TTS in thread pool and wait for completion
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    convert_text_to_speech_with_persona,
+                    response["message"],
+                    persona,
+                    response_audio_path
+                )
+                response["audio_url"] = f"/download/{session_id}_latest_response.mp3"
+                logger.info(f"Audio generated and ready at: {response_audio_path}")
+            
+            # Send response
+            await sio.emit("response", response, to=sid)
+            
+            # Send session started event if new
+            if is_new_session:
+                await sio.emit("session_started", {
+                    "session_id": session_id,
+                    "system": system,
+                    "persona": persona,
+                    "message": "New session started"
+                }, to=sid)
+            
+            logger.info(f"Sent response to {sid} for session {session_id}")
             
         except Exception as e:
-            logger.error(f"Error generating or sending response: {str(e)}", exc_info=True)
-            await sio.emit("error", {"message": f"Error processing your message: {str(e)}"}, to=sid)
+            logger.error(f"Error processing message: {str(e)}", exc_info=True)
+            await sio.emit("error", {
+                "message": f"Error processing message: {str(e)}",
+                "type": "error"
+            }, to=sid)
             
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}", exc_info=True)
-        error_msg = f"Error processing message: {str(e)}"
-        await sio.emit("error", {"message": error_msg}, to=sid)
+        logger.error(f"Unexpected error in text_message: {str(e)}", exc_info=True)
+        try:
+            await sio.emit("error", {
+                "message": "Internal server error",
+                "type": "error"
+            }, to=sid)
+        except:
+            pass  # Socket might be disconnected
 
 @sio.event
 async def audio_chunk(sid, data):
     """Handle incoming audio chunks, transcribe, and respond with AI-generated audio.
     
-    This is a legacy endpoint that processes audio chunks directly. It's recommended
-    to use the text-based WebSocket endpoint for new implementations.
-    """
-    global ai_agent
+    This endpoint processes audio chunks and routes them to either the LangGraph workflow
+    or improved AI agent based on the system parameter.
     
-    if ai_agent is None:
-        logger.error("AI Agent not initialized")
-        await sio.emit("error", {"message": "AI Agent not initialized"}, to=sid)
-        return
-        
+    For new implementations, it's recommended to use the text-based WebSocket endpoint.
+    """
     try:
-        logger.info(f"Received audio chunk from {sid} (legacy mode)")
+        logger.info(f"Received audio chunk from {sid}")
         
-        # Extract audio data and persona from the incoming message
+        # Extract audio data and parameters from the incoming message
         if isinstance(data, dict) and 'audio' in data:
             audio_data = data['audio']
-            persona = data.get('persona', 'skeptical')  # Default to 'skeptical' if not provided
+            persona = data.get('persona', 'friendly')  # Default to 'friendly' if not provided
+            system = data.get('system', 'workflow')    # Default to 'workflow' if not provided
+            session_id = data.get('session_id', sid)   # Use provided session_id or fallback to sid
         else:
-            # Backward compatibility with older clients
+            # Backward compatibility with older clients (legacy mode)
             audio_data = data
-            persona = 'skeptical'
+            persona = 'friendly'
+            system = 'workflow'
+            session_id = sid
         
         # Save the incoming audio to a temporary file for transcription
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_audio:
@@ -832,50 +736,115 @@ async def audio_chunk(sid, data):
         try:
             logger.info("Starting transcription...")
             transcription_result = transcribe_audio(temp_audio_path)
-            transcript_text = transcription_result.get('text', '')
+            transcript_text = transcription_result.get('text', '').strip()
             confidence = transcription_result.get('confidence', 0.0)
             
-            if not transcript_text.strip():
+            if not transcript_text:
                 logger.warning("Empty transcription result")
-                await sio.emit("error", {"message": "Could not transcribe audio. Please try again."}, to=sid)
+                await sio.emit("error", {
+                    "message": "Could not transcribe audio. Please try again.",
+                    "type": "transcription_error"
+                }, to=sid)
                 return
                 
             logger.info(f"Transcription complete (confidence: {confidence:.2f}): {transcript_text[:100]}...")
             
-            # Generate response using the AI agent
+            # Process the transcribed text using the appropriate system
             try:
-                investor_reply = ai_agent.generate_response(sid, transcript_text)
-                
-                logger.info("Converting response to speech with persona-specific voice...")
-                # Get audio data directly without saving to file using persona-specific voice
-                audio_data = convert_text_to_speech_with_persona(investor_reply, persona)
-                
-                if not audio_data:
-                    raise ValueError("Failed to generate audio response")
+                if system == "improved":
+                    if not improved_agent:
+                        raise Exception("Improved AI agent not initialized")
                     
-                logger.info(f"Generated {len(audio_data)} bytes of audio data")
+                    # Check if conversation exists for improved agent
+                    if not hasattr(improved_agent, 'conversations') or session_id not in improved_agent.conversations:
+                        logger.info(f"Starting new improved conversation for {session_id}")
+                        improved_agent.start_conversation(session_id, persona)
+                    
+                    # Process message with improved agent
+                    response_data = generate_improved_response(session_id, transcript_text)
+                    
+                    # Format response
+                    response = {
+                        "message": response_data.get("response", ""),
+                        "stage": response_data.get("current_stage", "introduction"),
+                        "complete": response_data.get("is_complete", False),
+                        "insights": {
+                            "suggestions": response_data.get("suggestions", []),
+                            "key_points": response_data.get("key_points", [])
+                        },
+                        "type": "improved",
+                        "transcript": transcript_text
+                    }
+                    
+                else:  # Default to workflow
+                    if not pitch_workflow:
+                        raise Exception("LangGraph workflow not initialized")
+                    
+                    # Try to process the message - if session doesn't exist, it will return an error
+                    response_data = handle_practice_message(session_id, transcript_text)
+                    
+                    # Check if we got an error response (session doesn't exist)
+                    if isinstance(response_data, dict) and "error" in response_data:
+                        # Session doesn't exist, start a new one
+                        logger.info(f"Starting new workflow session for {session_id}: {response_data.get('error')}")
+                        session_start_result = start_practice_session(session_id, persona)
+                        
+                        # Now process the user's message with the new session
+                        response_data = handle_practice_message(session_id, transcript_text)
+                        
+                        # If we still get an error, fall back to greeting
+                        if isinstance(response_data, dict) and "error" in response_data:
+                            logger.warning(f"Still getting error after starting session: {response_data.get('error')}")
+                            response_data = {
+                                "message": session_start_result.get("message", "Hello! I'm excited to hear your pitch. Please introduce yourself and your company."),
+                                "stage": session_start_result.get("stage", "greeting"),
+                                "complete": False,
+                                "insights": {}
+                            }
+                    
+                    # Format response
+                    response = {
+                        "message": response_data.get("message", ""),
+                        "stage": response_data.get("stage", "introduction"),
+                        "complete": response_data.get("complete", False),
+                        "insights": response_data.get("insights", {}),
+                        "type": "workflow",
+                        "transcript": transcript_text
+                    }
                 
-                # Send the audio data directly to the client
-                await sio.emit("ai_response", audio_data, to=sid)
+                # Generate audio response and wait for completion
+                if response["message"]:
+                    response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_latest_response.mp3")
+                    # Run TTS in thread pool and wait for completion
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        convert_text_to_speech_with_persona,
+                        response["message"],
+                        persona,
+                        response_audio_path
+                    )
+                    response["audio_url"] = f"/download/{session_id}_latest_response.mp3"
+                    logger.info(f"Audio generated and ready at: {response_audio_path}")
                 
-            except KeyError:
-                # If conversation doesn't exist, start a new one and retry
-                logger.info(f"Starting new conversation for {sid} with {persona} persona")
-                await sio.emit("status", {"message": "Starting new conversation..."}, to=sid)
+                # Send the response back to the client
+                await sio.emit("response", response, to=sid)
                 
-                # Start a new conversation
-                ai_agent.start_conversation(sid, persona)
+                logger.info(f"Sent response to {sid} for session {session_id}")
                 
-                # Get the initial greeting
-                initial_greeting = "Hello! I'm your AI investor. How can I help you today?"
-                
-                # Convert greeting to speech
-                audio_data = convert_text_to_speech_with_persona(initial_greeting, persona)
-                await sio.emit("ai_response", audio_data, to=sid)
+            except Exception as e:
+                logger.error(f"Error processing message: {str(e)}", exc_info=True)
+                await sio.emit("error", {
+                    "message": f"Error processing message: {str(e)}",
+                    "type": "processing_error"
+                }, to=sid)
             
         except Exception as e:
             logger.error(f"Error processing audio chunk: {str(e)}", exc_info=True)
-            await sio.emit("error", {"message": f"Error processing audio: {str(e)}"}, to=sid)
+            await sio.emit("error", {
+                "message": f"Error processing audio: {str(e)}",
+                "type": "audio_processing_error"
+            }, to=sid)
             
         finally:
             # Clean up the temporary file
@@ -887,417 +856,18 @@ async def audio_chunk(sid, data):
                 
     except Exception as e:
         logger.error(f"WebSocket error in audio_chunk: {str(e)}", exc_info=True)
-        await sio.emit("error", {"message": f"Error processing audio: {str(e)}"}, to=sid)
+        try:
+            await sio.emit("error", {
+                "message": "Internal server error",
+                "type": "server_error"
+            }, to=sid)
+        except:
+            pass  # Socket might be disconnected
 
 
 @sio.event
 async def disconnect(sid):
     logger.info(f"WebSocket disconnected: {sid}")
-
-@fastapi_app.get("/api/pitch/analysis/{session_id}")
-async def get_pitch_analysis(session_id: str):
-    """Get detailed pitch analysis for a session
-    
-    Args:
-        session_id: Session identifier
-    
-    Returns:
-        Detailed pitch analysis with scores and feedback
-    """
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
-        
-        # Get session data
-        session_data = get_pitch_analytics(session_id)
-        
-        if "error" in session_data:
-            raise HTTPException(status_code=404, detail=session_data["error"])
-        
-        # Get the latest analysis
-        analysis = session_data.get("pitch_analysis")
-        if not analysis:
-            raise HTTPException(
-                status_code=404,
-                detail="No pitch analysis available for this session"
-            )
-        
-        return {
-            "success": True,
-            "analysis": analysis,
-            "session_id": session_id,
-            "timestamp": analysis.get("timestamp")
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting pitch analysis: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get analysis: {str(e)}")
-
-@fastapi_app.get("/api/pitch/analysis/{session_id}/history")
-async def get_pitch_analysis_history(session_id: str):
-    """Get the history of pitch analysis for a session
-    
-    Args:
-        session_id: Session identifier
-    
-    Returns:
-        List of analysis snapshots throughout the session
-    """
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
-        
-        # Get session data
-        session_data = get_pitch_analytics(session_id)
-        
-        if "error" in session_data:
-            raise HTTPException(status_code=404, detail=session_data["error"])
-        
-        # Get analysis history
-        analysis_history = session_data.get("analysis_history", [])
-        if not analysis_history:
-            raise HTTPException(
-                status_code=404,
-                detail="No analysis history available for this session"
-            )
-        
-        return {
-            "success": True,
-            "history": analysis_history,
-            "session_id": session_id,
-            "total_analyses": len(analysis_history)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting analysis history: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get history: {str(e)}")
-
-@fastapi_app.get("/api/pitch/analysis/{session_id}/compare")
-async def compare_pitch_analyses(session_id: str):
-    """Compare the first and latest pitch analyses to show improvement
-    
-    Args:
-        session_id: Session identifier
-    
-    Returns:
-        Comparison of initial and final analyses
-    """
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
-        
-        # Get session data
-        session_data = get_pitch_analytics(session_id)
-        
-        if "error" in session_data:
-            raise HTTPException(status_code=404, detail=session_data["error"])
-        
-        # Get analysis history
-        analysis_history = session_data.get("analysis_history", [])
-        if len(analysis_history) < 2:
-            raise HTTPException(
-                status_code=404,
-                detail="Need at least two analyses to compare"
-            )
-        
-        # Get first and latest analyses
-        initial_analysis = analysis_history[0]
-        final_analysis = analysis_history[-1]
-        
-        # Calculate improvements
-        improvements = {}
-        for element in final_analysis["elements"]:
-            initial_score = initial_analysis["elements"][element]["score"]
-            final_score = final_analysis["elements"][element]["score"]
-            improvement = final_score - initial_score
-            improvements[element] = {
-                "initial_score": initial_score,
-                "final_score": final_score,
-                "improvement": improvement,
-                "improvement_percentage": (improvement / initial_score * 100) if initial_score > 0 else 0
-            }
-        
-        return {
-            "success": True,
-            "session_id": session_id,
-            "initial_analysis": initial_analysis,
-            "final_analysis": final_analysis,
-            "improvements": improvements,
-            "overall_improvement": {
-                "initial_score": initial_analysis["overall_score"],
-                "final_score": final_analysis["overall_score"],
-                "improvement": final_analysis["overall_score"] - initial_analysis["overall_score"],
-                "improvement_percentage": (
-                    (final_analysis["overall_score"] - initial_analysis["overall_score"]) /
-                    initial_analysis["overall_score"] * 100
-                ) if initial_analysis["overall_score"] > 0 else 0
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error comparing analyses: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to compare analyses: {str(e)}")
-
-@fastapi_app.get("/pitch/analysis/{session_id}", response_class=HTMLResponse)
-async def view_pitch_analysis(request: Request, session_id: str):
-    """Render the pitch analysis view for a session
-    
-    Args:
-        request: FastAPI request object
-        session_id: Session identifier
-    
-    Returns:
-        Rendered pitch analysis template
-    """
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
-        
-        # Get session data
-        session_data = get_pitch_analytics(session_id)
-        
-        if "error" in session_data:
-            raise HTTPException(status_code=404, detail=session_data["error"])
-        
-        # Get the latest analysis
-        analysis = session_data.get("pitch_analysis")
-        if not analysis:
-            raise HTTPException(
-                status_code=404,
-                detail="No pitch analysis available for this session"
-            )
-        
-        return templates.TemplateResponse(
-            "pitch_analysis.html",
-            {
-                "request": request,
-                "analysis": analysis,
-                "session_id": session_id
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error rendering pitch analysis: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to render analysis: {str(e)}")
-
-@fastapi_app.get("/api/pitch/analysis/{session_id}/quick")
-async def get_quick_analysis(session_id: str):
-    """Get a quick analysis of the current pitch state
-    
-    Args:
-        session_id: Session identifier
-    
-    Returns:
-        Quick analysis with current score and key insights
-    """
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
-        
-        # Get session data
-        session_data = get_pitch_analytics(session_id)
-        
-        if "error" in session_data:
-            raise HTTPException(status_code=404, detail=session_data["error"])
-        
-        # Get the latest analysis or create a new one
-        analysis = session_data.get("pitch_analysis")
-        if not analysis:
-            # Create a quick analysis based on current session state
-            analyzer = PitchAnalyzer()
-            analysis = analyzer.analyze_pitch(
-                session_data.get("transcript", ""),
-                session_data.get("current_stage", "introduction")
-            )
-        
-        # Extract key insights
-        key_insights = []
-        for element in analysis["elements"].values():
-            if element["score"] >= 80:
-                key_insights.append(f"Strong {element['name']}: {element['feedback']}")
-            elif element["score"] <= 40:
-                key_insights.append(f"Improve {element['name']}: {element['feedback']}")
-        
-        return {
-            "success": True,
-            "analysis": {
-                "overall_score": analysis["overall_score"],
-                "key_insights": key_insights[:3],  # Top 3 insights
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting quick analysis: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get quick analysis: {str(e)}")
-
-@fastapi_app.get("/conversation/{session_id}/memory")
-async def get_conversation_memory_stats(session_id: str):
-    """Get memory statistics for a conversation."""
-    try:
-        if session_id in conversation_states:
-            conversation = conversation_states[session_id]
-            return {
-                "memory_stats": conversation.get_memory_stats(),
-                "langchain_context": conversation.get_langchain_context() if hasattr(conversation, 'get_langchain_context') else None,
-                "basic_summary": conversation.get_conversation_summary()
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-    except Exception as e:
-        logger.error(f"Error getting memory stats: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting memory stats: {str(e)}")
-
-@fastapi_app.get("/conversation/{session_id}/context")
-async def get_conversation_context(session_id: str):
-    """Get the full conversation context with LangChain enhancement."""
-    try:
-        if session_id in conversation_states:
-            conversation = conversation_states[session_id]
-            
-            # Get enhanced context if available
-            if hasattr(conversation, 'get_langchain_context'):
-                context = conversation.get_langchain_context()
-                using_langchain = conversation.use_langchain
-            else:
-                context = conversation.get_conversation_summary()
-                using_langchain = False
-            
-            return {
-                "conversation_id": session_id,
-                "context": context,
-                "using_langchain": using_langchain,
-                "persona": conversation.persona,
-                "message_count": len(conversation.conversation_history)
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-    except Exception as e:
-        logger.error(f"Error getting conversation context: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting context: {str(e)}")
-
-@fastapi_app.get("/langchain-status")
-async def get_langchain_status():
-    """Check if LangChain is available and working."""
-    try:
-        status = {
-            "langchain_available": True,  # Now handled by intelligent agent
-            "google_api_key_set": bool(os.getenv("GEMINI_API_KEY")),
-            "active_conversations": len(conversation_states)
-        }
-        
-        if True:  # Enhanced AI agent is always available
-            # Count conversations using LangChain
-            langchain_conversations = sum(1 for conv in conversation_states.values() 
-                                        if hasattr(conv, 'use_langchain') and conv.use_langchain)
-            status["conversations_using_langchain"] = langchain_conversations
-        
-        return status
-        
-    except Exception as e:
-        logger.error(f"Error checking LangChain status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error checking status: {str(e)}")
-
-@fastapi_app.get("/api/conversation/{conversation_id}/stats")
-async def get_conversation_stats(conversation_id: str):
-    """Get statistics for a specific conversation.
-    
-    Args:
-        conversation_id: The ID of the conversation to get stats for
-        
-    Returns:
-        dict: Conversation statistics or error details
-        
-    Raises:
-        HTTPException: With appropriate status code and error details
-    """
-    global ai_agent
-    
-    try:
-        if not conversation_id:
-            logger.warning("Empty conversation_id provided")
-            raise HTTPException(
-                status_code=400, 
-                detail={
-                    "error": "conversation_id is required", 
-                    "status": "error",
-                    "message": "Please provide a valid conversation ID"
-                }
-            )
-            
-        if ai_agent is None:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "error": "Service Unavailable",
-                    "status": "error",
-                    "message": "AI Agent is not initialized. Please try again later."
-                }
-            )
-            
-        # Get conversation statistics directly from the agent
-        try:
-            stats = ai_agent.get_conversation_stats(conversation_id)
-            logger.debug(f"Conversation stats response: {stats}")
-            
-            # Handle different status responses
-            status = stats.get("status", "active")
-            
-            if status == "active":
-                return {
-                    "status": "success",
-                    "data": {
-                        "conversation_id": conversation_id,
-                        "current_stage": stats.get("current_stage"),
-                        "stages_completed": stats.get("stages_completed", []),
-                        "next_stage": stats.get("next_stage"),
-                        "messages_exchanged": stats.get("messages_exchanged", 0),
-                        "last_activity": stats.get("last_activity")
-                    }
-                }
-            else:
-                # Handle other statuses
-                return {
-                    "status": "success",
-                    "data": stats
-                }
-                
-        except KeyError:
-            # Handle case where conversation doesn't exist
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "Conversation not found",
-                    "status": "not_found",
-                    "message": f"No conversation found with ID: {conversation_id}"
-                }
-            )
-            
-    except HTTPException:
-        # Re-raise HTTP exceptions as is
-        raise
-        
-    except Exception as e:
-        logger.error(f"Unexpected error getting conversation stats: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Internal server error",
-                "status": "error",
-                "type": type(e).__name__,
-                "message": str(e)
-            }
-        )
 
 # This block is only for direct execution with `python main.py`
 if __name__ == "__main__":
