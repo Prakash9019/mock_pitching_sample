@@ -58,7 +58,7 @@
 
     document.getElementById('quickAnalysisBtn').addEventListener('click', async () => {
       try {
-        const response = await fetch(`/api/pitch/analysis/${currentSessionId}/quick`);
+        const response = await fetch(`/api/pitch/analytics/${currentSessionId}`);
         const data = await response.json();
         if (data.success) {
           updateRealtimeAnalysis(data.analysis);

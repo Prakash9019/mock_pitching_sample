@@ -19,7 +19,9 @@ BASE URL: https://ai-mock-pitching-427457295403.europe-west1.run.app/
 
 3. REAL-TIME CHAT
    Send: text_message with {text, persona, session_id, system}
+   Send: audio_chunk with {audio_data, session_id, persona, is_final}
    Receive: response with {message, audio_url, stage, complete}
+   Receive: transcription with {text, is_final, session_id}
 
 4. END SESSION & ANALYSIS
    POST /api/pitch/end/{session_id}
@@ -69,16 +71,71 @@ npm install socket.io-client axios
    });
 
 5. END SESSION:
-   fetch(`http://localhost:8080/api/pitch/end/${sessionId}`, {
+   fetch(`https://ai-mock-pitching-427457295403.europe-west1.run.app/api/pitch/end/${sessionId}`, {
      method: 'POST',
      headers: {'Content-Type': 'application/json'},
      body: JSON.stringify({reason: 'user_ended'})
    })
 
 6. GET ANALYSIS:
-   fetch(`http://localhost:8080/api/pitch/analysis/${sessionId}`)
+   fetch(`https://ai-mock-pitching-427457295403.europe-west1.run.app/api/pitch/analysis/${sessionId}`)
    .then(res => res.json())
    .then(data => console.log(data.analysis))
+
+📊 NEW ANALYSIS STRUCTURE
+=========================
+
+The analysis now includes 10 key categories with detailed scoring:
+
+1. HOOKS & STORY - Opening engagement and storytelling
+2. PROBLEM & URGENCY - Problem identification and urgency
+3. SOLUTION & FIT - Solution clarity and product-market fit
+4. MARKET & OPPORTUNITY - Market size and opportunity assessment
+5. TEAM & EXECUTION - Team strength and execution capability
+6. BUSINESS MODEL - Revenue model and monetization strategy
+7. COMPETITIVE EDGE - Differentiation and competitive advantage
+8. TRACTION & VISION - Current progress and future roadmap
+9. FUNDING ASK - Funding requirements and use of funds
+10. CLOSING IMPACT - Call to action and memorable closing
+
+Rating Scale:
+- Need to Improve (0-39): Significant gaps, major work needed
+- Below Average (40-59): Some elements present, needs improvement
+- Satisfactory (60-74): Meets basic requirements, room for enhancement
+- Good (75-89): Strong performance, minor improvements needed
+- Vertx Assured (90-100): Exceptional, investor-ready quality
+
+🎤 REAL-TIME AUDIO STREAMING
+===========================
+
+7. START AUDIO RECORDING:
+   socket.emit('start_recording', {
+     session_id: sessionId,
+     persona: 'skeptical',
+     sample_rate: 16000
+   });
+
+8. SEND AUDIO CHUNKS:
+   // Convert audio to base64
+   const audioBase64 = arrayBufferToBase64(audioBuffer);
+   socket.emit('audio_chunk', {
+     audio_data: audioBase64,
+     session_id: sessionId,
+     persona: 'skeptical',
+     is_final: false
+   });
+
+9. RECEIVE TRANSCRIPTIONS:
+   socket.on('transcription', (data) => {
+     if (data.is_final) {
+       console.log('Final:', data.text);
+     } else {
+       console.log('Interim:', data.text);
+     }
+   });
+
+10. STOP RECORDING:
+    socket.emit('stop_recording', { session_id: sessionId });
 
 🎯 MINIMAL WORKING EXAMPLE (React)
 =================================
@@ -91,16 +148,27 @@ function PitchApp() {
   const [sessionId, setSessionId] = useState(null);
   const [message, setMessage] = useState('');
   const [responses, setResponses] = useState([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcription, setTranscription] = useState('');
 
   useEffect(() => {
-    const newSocket = io('http://localhost:8080');
+    const newSocket = io('https://ai-mock-pitching-427457295403.europe-west1.run.app/');
     setSocket(newSocket);
     
     newSocket.on('response', (data) => {
       setResponses(prev => [...prev, data.message]);
       if (data.audio_url) {
-        const audio = new Audio('http://localhost:8080' + data.audio_url);
+        const audio = new Audio('https://ai-mock-pitching-427457295403.europe-west1.run.app' + data.audio_url);
         audio.play();
+      }
+    });
+
+    newSocket.on('transcription', (data) => {
+      if (data.is_final) {
+        setTranscription('');
+        // Final transcription will trigger AI response
+      } else {
+        setTranscription(data.text);
       }
     });
 
@@ -123,6 +191,47 @@ function PitchApp() {
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      
+      socket.emit('start_recording', {
+        session_id: sessionId,
+        persona: 'skeptical',
+        sample_rate: 16000
+      });
+
+      mediaRecorder.ondataavailable = async (event) => {
+        if (event.data.size > 0) {
+          const arrayBuffer = await event.data.arrayBuffer();
+          const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+          
+          socket.emit('audio_chunk', {
+            audio_data: base64Audio,
+            session_id: sessionId,
+            persona: 'skeptical',
+            is_final: false
+          });
+        }
+      };
+
+      mediaRecorder.start(100); // Send chunks every 100ms
+      setIsRecording(true);
+      
+      // Stop after 5 seconds (or implement stop button)
+      setTimeout(() => {
+        mediaRecorder.stop();
+        stream.getTracks().forEach(track => track.stop());
+        socket.emit('stop_recording', { session_id: sessionId });
+        setIsRecording(false);
+      }, 5000);
+      
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+    }
+  };
+
   return (
     <div>
       <button onClick={startSession}>Start Session</button>
@@ -130,8 +239,15 @@ function PitchApp() {
         value={message} 
         onChange={(e) => setMessage(e.target.value)}
         placeholder="Type your message"
+        disabled={isRecording}
       />
-      <button onClick={sendMessage}>Send</button>
+      <button onClick={sendMessage} disabled={isRecording}>Send Text</button>
+      <button onClick={startRecording} disabled={!sessionId || isRecording}>
+        {isRecording ? '🎤 Recording...' : '🎤 Record Voice'}
+      </button>
+      
+      {transcription && <p>Listening: {transcription}</p>}
+      
       <div>
         {responses.map((resp, i) => <p key={i}>{resp}</p>)}
       </div>
@@ -147,8 +263,14 @@ export default PitchApp;
 <template>
   <div>
     <button @click="startSession">Start Session</button>
-    <input v-model="message" placeholder="Type your message" />
-    <button @click="sendMessage">Send</button>
+    <input v-model="message" placeholder="Type your message" :disabled="isRecording" />
+    <button @click="sendMessage" :disabled="isRecording">Send Text</button>
+    <button @click="startRecording" :disabled="!sessionId || isRecording">
+      {{ isRecording ? '🎤 Recording...' : '🎤 Record Voice' }}
+    </button>
+    
+    <p v-if="transcription">Listening: {{ transcription }}</p>
+    
     <div>
       <p v-for="(resp, i) in responses" :key="i">{{ resp }}</p>
     </div>
@@ -164,18 +286,28 @@ export default {
       socket: null,
       sessionId: null,
       message: '',
-      responses: []
+      responses: [],
+      isRecording: false,
+      transcription: ''
     };
   },
   
   mounted() {
-    this.socket = io('http://localhost:8080');
+    this.socket = io('https://ai-mock-pitching-427457295403.europe-west1.run.app/');
     
     this.socket.on('response', (data) => {
       this.responses.push(data.message);
       if (data.audio_url) {
-        const audio = new Audio('http://localhost:8080' + data.audio_url);
+        const audio = new Audio('https://ai-mock-pitching-427457295403.europe-west1.run.app' + data.audio_url);
         audio.play();
+      }
+    });
+
+    this.socket.on('transcription', (data) => {
+      if (data.is_final) {
+        this.transcription = '';
+      } else {
+        this.transcription = data.text;
       }
     });
   },
@@ -194,6 +326,46 @@ export default {
           system: 'workflow'
         });
         this.message = '';
+      }
+    },
+
+    async startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        
+        this.socket.emit('start_recording', {
+          session_id: this.sessionId,
+          persona: 'skeptical',
+          sample_rate: 16000
+        });
+
+        mediaRecorder.ondataavailable = async (event) => {
+          if (event.data.size > 0) {
+            const arrayBuffer = await event.data.arrayBuffer();
+            const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+            
+            this.socket.emit('audio_chunk', {
+              audio_data: base64Audio,
+              session_id: this.sessionId,
+              persona: 'skeptical',
+              is_final: false
+            });
+          }
+        };
+
+        mediaRecorder.start(100);
+        this.isRecording = true;
+        
+        setTimeout(() => {
+          mediaRecorder.stop();
+          stream.getTracks().forEach(track => track.stop());
+          this.socket.emit('stop_recording', { session_id: this.sessionId });
+          this.isRecording = false;
+        }, 5000);
+        
+      } catch (error) {
+        console.error('Error accessing microphone:', error);
       }
     }
   }
@@ -230,29 +402,99 @@ WEBSOCKET RESPONSE:
   "type": "workflow"
 }
 
+TRANSCRIPTION RESPONSE:
+{
+  "text": "Hello, I am Alex from Vertex and we are building...",
+  "is_final": true,
+  "session_id": "session_123",
+  "confidence": 0.95
+}
+
 ANALYSIS RESPONSE:
 {
   "success": true,
   "analysis": {
     "overall_score": 75,
+    "overall_rating": "Good",
+    "overall_description": "Strong foundation with good engagement across most categories",
     "completion_percentage": 80,
-    "pitch_readiness": "Good",
+    "pitch_readiness": "Ready",
     "session_duration_minutes": 15,
+    "category_scores": {
+      "hooks_story": {
+        "score": 78,
+        "rating": "Good",
+        "description": "Engaging opening with compelling narrative"
+      },
+      "problem_urgency": {
+        "score": 82,
+        "rating": "Good", 
+        "description": "Clear problem identification with urgency"
+      },
+      "solution_fit": {
+        "score": 75,
+        "rating": "Good",
+        "description": "Solution clearly presented with good fit"
+      },
+      "market_opportunity": {
+        "score": 68,
+        "rating": "Satisfactory",
+        "description": "Market size mentioned, needs more data"
+      },
+      "team_execution": {
+        "score": 80,
+        "rating": "Good",
+        "description": "Strong team with relevant experience"
+      },
+      "business_model": {
+        "score": 65,
+        "rating": "Satisfactory",
+        "description": "Revenue model needs clearer strategy"
+      },
+      "competitive_edge": {
+        "score": 70,
+        "rating": "Satisfactory",
+        "description": "Needs stronger differentiation"
+      },
+      "traction_vision": {
+        "score": 85,
+        "rating": "Good",
+        "description": "Good traction with clear vision"
+      },
+      "funding_ask": {
+        "score": 60,
+        "rating": "Satisfactory",
+        "description": "Use of funds needs more detail"
+      },
+      "closing_impact": {
+        "score": 72,
+        "rating": "Satisfactory",
+        "description": "Could be more impactful"
+      }
+    },
     "strengths": [
       {
         "area": "Problem Definition",
-        "description": "Clear articulation of the problem"
+        "description": "Clear articulation of the problem",
+        "score": 8
       }
     ],
     "weaknesses": [
       {
         "area": "Market Size",
-        "description": "Need more specific market data"
+        "description": "Need more specific market data",
+        "improvement": "Include market research and validation"
       }
     ],
     "key_recommendations": [
-      "Provide specific market size data",
-      "Include customer testimonials"
+      "Strengthen market opportunity with specific data",
+      "Provide detailed funding allocation breakdown",
+      "Enhance competitive differentiation"
+    ],
+    "investor_perspective": "Good potential with strong team, needs market validation",
+    "next_steps": [
+      "Conduct market research",
+      "Prepare financial projections"
     ]
   }
 }
@@ -261,9 +503,10 @@ ANALYSIS RESPONSE:
 =================
 
 1. CONNECTION ISSUES:
-   - Check if backend server is running on port 8080
+   - Backend is hosted on Google Cloud Run (not localhost)
    - Verify CORS settings allow your frontend domain
    - Test WebSocket connection in browser dev tools
+   - Use HTTPS URLs for production deployment
 
 2. AUDIO NOT PLAYING:
    - Check browser audio permissions
@@ -280,6 +523,18 @@ ANALYSIS RESPONSE:
    - Check request headers and body format
    - Handle HTTP status codes properly
 
+5. AUDIO RECORDING ISSUES:
+   - Check microphone permissions in browser
+   - Verify getUserMedia() is supported
+   - Test with HTTPS (required for microphone access)
+   - Check audio format compatibility
+
+6. TRANSCRIPTION NOT WORKING:
+   - Verify WebSocket connection is active
+   - Check audio chunk size and format
+   - Ensure proper base64 encoding
+   - Test with different browsers
+
 🚀 PRODUCTION CHECKLIST
 ======================
 
@@ -293,6 +548,20 @@ ANALYSIS RESPONSE:
 □ Configure environment variables
 □ Implement user authentication if needed
 □ Add analytics and monitoring
+
+🎤 AUDIO-SPECIFIC CHECKLIST
+==========================
+
+□ Test microphone permissions across browsers
+□ Implement audio recording indicators
+□ Add audio quality settings (sample rate, bitrate)
+□ Handle network interruptions during recording
+□ Add push-to-talk vs continuous recording options
+□ Implement audio level visualization
+□ Add noise cancellation settings
+□ Test with different audio devices
+□ Implement audio recording time limits
+□ Add offline audio caching
 
 📞 SUPPORT
 =========

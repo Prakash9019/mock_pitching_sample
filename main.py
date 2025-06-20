@@ -40,6 +40,11 @@ from app.services.intelligent_ai_agent_improved import (
     improved_agent
 )
 
+# Import database components
+from app.database import connect_to_mongo, close_mongo_connection, get_database
+from app.services.database_service import DatabaseService
+from app.models import PitchAnalysis, PitchSession
+
 # Integration example import removed - focusing on audio conversation
 
 # Configure logging
@@ -97,6 +102,32 @@ logger.info(f"Session directory: {SESSION_DIR}")
 
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_PATH, "templates"))
+
+# Global database service instance
+db_service: Optional[DatabaseService] = None
+
+# Database startup and shutdown events
+@fastapi_app.on_event("startup")
+async def startup_event():
+    """Initialize database connection on startup"""
+    global db_service
+    try:
+        await connect_to_mongo()
+        database = await get_database()
+        db_service = DatabaseService(database)
+        logger.info("Database service initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+
+@fastapi_app.on_event("shutdown")
+async def shutdown_event():
+    """Close database connection on shutdown"""
+    try:
+        await close_mongo_connection()
+        logger.info("Database connection closed")
+    except Exception as e:
+        logger.error(f"Error closing database connection: {e}")
 
 # Mount static files
 fastapi_app.mount("/static", StaticFiles(directory=os.path.join(BASE_PATH, "static")), name="static")
@@ -581,11 +612,26 @@ async def start_pitch_practice(
         if "error" in session_data:
             raise HTTPException(status_code=500, detail=session_data["error"])
         
-        logger.info(f"Started {system} pitch session with {persona} persona: {session_data.get('session_id')}")
+        session_id = session_data.get("session_id")
+        
+        # Create database record for the session
+        if db_service and session_id:
+            try:
+                await db_service.create_session({
+                    "session_id": session_id,
+                    "persona_used": persona,
+                    "status": "active"
+                })
+                logger.info(f"Created database record for session: {session_id}")
+            except Exception as db_error:
+                logger.error(f"Failed to create database record for session: {db_error}")
+                # Continue anyway, don't fail the session start
+        
+        logger.info(f"Started {system} pitch session with {persona} persona: {session_id}")
         
         return {
             "success": True,
-            "session_id": session_data.get("session_id"),
+            "session_id": session_id,
             "message": session_data.get("message"),
             "persona": persona,
             "system": system,
@@ -692,10 +738,39 @@ async def get_pitch_session_analytics(session_id: str):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
         
+        if not db_service:
+            raise HTTPException(status_code=500, detail="Database service not available")
+        
+        # Try to get from database first
+        quick_analytics = await db_service.get_quick_analytics(session_id)
+        
+        if quick_analytics:
+            return {
+                "success": True,
+                "analytics": {
+                    "overall_score": quick_analytics["overall_score"],
+                    "key_insights": quick_analytics["key_insights"],
+                    "completion_percentage": quick_analytics["completion_percentage"],
+                    "current_topics": quick_analytics["current_topics"],
+                    "generated_at": quick_analytics["generated_at"]
+                }
+            }
+        
+        # Fallback to original method if not in database
         analytics = get_pitch_analytics(session_id)
         
         if "error" in analytics:
             raise HTTPException(status_code=404, detail=analytics["error"])
+        
+        # Save to database for future use
+        if analytics and "overall_score" in analytics:
+            await db_service.save_quick_analytics({
+                "session_id": session_id,
+                "overall_score": analytics.get("overall_score", 0),
+                "key_insights": analytics.get("key_insights", []),
+                "completion_percentage": analytics.get("completion_percentage", 0),
+                "current_topics": analytics.get("current_topics", [])
+            })
         
         return {
             "success": True,
@@ -722,10 +797,32 @@ async def get_pitch_analysis_report(session_id: str):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
         
+        if not db_service:
+            raise HTTPException(status_code=500, detail="Database service not available")
+        
+        # Try to get from database first
+        stored_analysis = await db_service.get_analysis(session_id)
+        
+        if stored_analysis:
+            logger.info(f"Retrieved analysis from database for session: {session_id}")
+            return {
+                "success": True,
+                "analysis": stored_analysis
+            }
+        
+        # Generate new analysis if not in database
         analysis = generate_pitch_analysis_report(session_id)
         
         if "error" in analysis:
             raise HTTPException(status_code=404, detail=analysis["error"])
+        
+        # Save the analysis to database
+        try:
+            await db_service.save_analysis(analysis)
+            logger.info(f"Saved new analysis to database for session: {session_id}")
+        except Exception as save_error:
+            logger.error(f"Failed to save analysis to database: {save_error}")
+            # Continue anyway, return the analysis even if saving failed
         
         return {
             "success": True,
@@ -753,10 +850,29 @@ async def end_pitch_session(session_id: str, reason: str = "user_ended"):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
         
+        if not db_service:
+            raise HTTPException(status_code=500, detail="Database service not available")
+        
+        # End the session and generate analysis
         analysis = end_pitch_session_with_analysis(session_id, reason)
         
         if "error" in analysis:
             raise HTTPException(status_code=404, detail=analysis["error"])
+        
+        # Save the analysis to database
+        try:
+            await db_service.save_analysis(analysis)
+            logger.info(f"Saved final analysis to database for session: {session_id}")
+        except Exception as save_error:
+            logger.error(f"Failed to save final analysis to database: {save_error}")
+        
+        # Update session status in database
+        try:
+            session_duration = analysis.get("session_duration_minutes", 0)
+            await db_service.end_session(session_id, session_duration)
+            logger.info(f"Updated session status in database for session: {session_id}")
+        except Exception as update_error:
+            logger.error(f"Failed to update session status: {update_error}")
         
         return {
             "success": True,

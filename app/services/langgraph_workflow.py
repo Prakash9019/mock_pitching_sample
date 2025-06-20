@@ -808,8 +808,62 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             Please provide a detailed analysis in the following JSON format:
             {{
                 "overall_score": <score out of 100>,
+                "overall_rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                "overall_description": "<Detailed description of overall performance>",
                 "confidence_level": "<Low/Medium/High>",
                 "pitch_readiness": "<Not Ready/Partially Ready/Ready/Investor Ready>",
+                "category_scores": {{
+                    "hooks_story": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on opening hooks and storytelling>"
+                    }},
+                    "problem_urgency": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on problem identification and urgency>"
+                    }},
+                    "solution_fit": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on solution and product-market fit>"
+                    }},
+                    "market_opportunity": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on market size and opportunity>"
+                    }},
+                    "team_execution": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on team strength and execution capability>"
+                    }},
+                    "business_model": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on revenue model and monetization>"
+                    }},
+                    "competitive_edge": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on competitive advantage and differentiation>"
+                    }},
+                    "traction_vision": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on current traction and future vision>"
+                    }},
+                    "funding_ask": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on funding requirements and use of funds>"
+                    }},
+                    "closing_impact": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on closing statement and call to action>"
+                    }}
+                }},
                 "strengths": [
                     {{"area": "<strength area>", "description": "<detailed description>", "score": <1-10>}},
                     ...
@@ -818,17 +872,6 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                     {{"area": "<weakness area>", "description": "<detailed description>", "improvement": "<specific improvement suggestion>"}},
                     ...
                 ],
-                "stage_scores": {{
-                    "greeting": <score 1-10>,
-                    "problem_solution": <score 1-10>,
-                    "target_market": <score 1-10>,
-                    "business_model": <score 1-10>,
-                    "competition": <score 1-10>,
-                    "traction": <score 1-10>,
-                    "team": <score 1-10>,
-                    "funding_needs": <score 1-10>,
-                    "future_plans": <score 1-10>
-                }},
                 "key_recommendations": [
                     "<specific actionable recommendation>",
                     ...
@@ -840,17 +883,24 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                 ]
             }}
             
-            Base your analysis on:
-            1. Clarity and completeness of responses
-            2. Use of specific data and metrics
-            3. Market understanding and sizing
-            4. Competitive differentiation
-            5. Team credibility and experience
-            6. Financial projections and business model
-            7. Traction and validation
-            8. Vision and scalability
-            9. Communication effectiveness
-            10. Overall investor appeal
+            Base your analysis on these 10 key categories:
+            1. HOOKS & STORY: Opening engagement, storytelling ability, emotional connection
+            2. PROBLEM & URGENCY: Problem identification, market pain points, urgency demonstration
+            3. SOLUTION & FIT: Solution clarity, product-market fit, value proposition
+            4. MARKET & OPPORTUNITY: Market size, opportunity assessment, target audience
+            5. TEAM & EXECUTION: Team strength, execution capability, relevant experience
+            6. BUSINESS MODEL: Revenue streams, monetization strategy, financial sustainability
+            7. COMPETITIVE EDGE: Differentiation, competitive advantage, unique positioning
+            8. TRACTION & VISION: Current progress, growth metrics, future roadmap
+            9. FUNDING ASK: Funding requirements, use of funds, investment rationale
+            10. CLOSING IMPACT: Call to action, memorable closing, investor engagement
+            
+            Rating Scale:
+            - Need to Improve (0-39): Significant gaps, requires major work
+            - Below Average (40-59): Some elements present but needs improvement
+            - Satisfactory (60-74): Meets basic requirements, room for enhancement
+            - Good (75-89): Strong performance, minor improvements needed
+            - Vertx Assured (90-100): Exceptional, investor-ready quality
             """
             
             try:
@@ -918,10 +968,74 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
         
         overall_score = int(completion_score + insight_score + duration_score + response_score)
         
+        def get_rating(score):
+            if score >= 90: return "Vertx Assured"
+            elif score >= 75: return "Good"
+            elif score >= 60: return "Satisfactory"
+            elif score >= 40: return "Below Average"
+            else: return "Need to Improve"
+        
+        # Generate basic category scores
+        base_category_score = max(30, overall_score - 20)  # Base score for each category
+        category_scores = {
+            "hooks_story": {
+                "score": base_category_score,
+                "rating": get_rating(base_category_score),
+                "description": "Basic storytelling elements present, could be more engaging"
+            },
+            "problem_urgency": {
+                "score": base_category_score + 5,
+                "rating": get_rating(base_category_score + 5),
+                "description": "Problem identification attempted, needs more urgency"
+            },
+            "solution_fit": {
+                "score": base_category_score,
+                "rating": get_rating(base_category_score),
+                "description": "Solution presented, product-market fit needs validation"
+            },
+            "market_opportunity": {
+                "score": base_category_score - 5,
+                "rating": get_rating(base_category_score - 5),
+                "description": "Market opportunity mentioned, needs more specific data"
+            },
+            "team_execution": {
+                "score": base_category_score,
+                "rating": get_rating(base_category_score),
+                "description": "Team information provided, execution capability unclear"
+            },
+            "business_model": {
+                "score": base_category_score - 10,
+                "rating": get_rating(base_category_score - 10),
+                "description": "Business model needs clearer articulation"
+            },
+            "competitive_edge": {
+                "score": base_category_score - 5,
+                "rating": get_rating(base_category_score - 5),
+                "description": "Competitive advantage mentioned, needs stronger differentiation"
+            },
+            "traction_vision": {
+                "score": base_category_score,
+                "rating": get_rating(base_category_score),
+                "description": "Some traction indicators, vision needs more clarity"
+            },
+            "funding_ask": {
+                "score": base_category_score - 15,
+                "rating": get_rating(base_category_score - 15),
+                "description": "Funding requirements need more specific details"
+            },
+            "closing_impact": {
+                "score": base_category_score - 10,
+                "rating": get_rating(base_category_score - 10),
+                "description": "Closing needs more impact and clear call to action"
+            }
+        }
+        
         return {
             "session_id": analytics['session_id'],
             "generated_at": datetime.now().isoformat(),
             "overall_score": overall_score,
+            "overall_rating": get_rating(overall_score),
+            "overall_description": f"Completed {stages_completed}/9 stages with {total_insights} key insights. {'Good foundation' if overall_score >= 60 else 'Needs improvement'} for investor presentation.",
             "confidence_level": "Medium" if overall_score >= 60 else "Low",
             "pitch_readiness": "Ready" if overall_score >= 80 else "Partially Ready" if overall_score >= 60 else "Not Ready",
             "session_duration_minutes": analytics['duration_minutes'],
@@ -931,6 +1045,7 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             "founder_name": state.get('founder_name', ''),
             "company_name": state.get('company_name', ''),
             "persona_used": state['persona'],
+            "category_scores": category_scores,
             "strengths": [
                 {"area": "Engagement", "description": f"Completed {stages_completed} stages showing good engagement", "score": min(stages_completed, 10)},
                 {"area": "Detail", "description": f"Provided {total_insights} key insights across stages", "score": min(total_insights // 2, 10)}
@@ -938,13 +1053,14 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             "weaknesses": [
                 {"area": "Completion", "description": f"Only completed {stages_completed}/9 stages", "improvement": "Complete all pitch stages for comprehensive feedback"}
             ] if stages_completed < 9 else [],
-            "stage_scores": {stage: 7 if stage in analytics['completed_stages'] else 0 for stage in PITCH_STAGES},
             "key_recommendations": [
-                "Complete all 9 pitch stages for comprehensive evaluation",
+                "Complete all 10 pitch categories for comprehensive evaluation",
                 "Provide more specific metrics and data points",
-                "Practice articulating value proposition clearly"
+                "Practice articulating value proposition clearly",
+                "Strengthen competitive differentiation",
+                "Develop more impactful closing statements"
             ],
-            "investor_perspective": f"Based on {stages_completed} completed stages, this pitch shows {'good potential' if overall_score >= 60 else 'needs improvement'}.",
+            "investor_perspective": f"Based on {stages_completed} completed stages, this pitch shows {'good potential' if overall_score >= 60 else 'needs improvement'}. Focus on completing all categories for investor readiness.",
             "next_steps": [
                 "Complete remaining pitch stages" if stages_completed < 9 else "Practice with different investor personas",
                 "Gather more specific metrics and data",
