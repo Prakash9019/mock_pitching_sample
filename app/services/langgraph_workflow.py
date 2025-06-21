@@ -786,6 +786,9 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             if "error" in analytics:
                 return analytics
             
+            # Calculate communication metrics
+            comm_metrics = self._calculate_communication_metrics(state['messages'])
+            
             # Generate comprehensive analysis using AI
             analysis_prompt = f"""
             Analyze this pitch practice session and provide a comprehensive evaluation report.
@@ -798,6 +801,12 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             - Current Stage: {analytics['current_stage']}
             - Total Questions Asked: {analytics['total_questions']}
             - Session Complete: {analytics['workflow_complete']}
+            
+            COMMUNICATION METRICS:
+            - Engagement: Talked {comm_metrics['engagement']['talked_count']} times ({comm_metrics['engagement']['talk_percentage']}%), Listened {comm_metrics['engagement']['listened_count']} times ({comm_metrics['engagement']['listen_percentage']}%)
+            - Fluency: {comm_metrics['fluency']['filler_count']} fillers, {comm_metrics['fluency']['grammar_issues']} grammar issues, {comm_metrics['fluency']['vocabulary_richness']} vocabulary richness
+            - Interactivity: {comm_metrics['interactivity']['conversation_turns']} turns, {comm_metrics['interactivity']['turn_frequency']} turn frequency
+            - Questions: {comm_metrics['questions_asked']['founder_questions']} questions asked, {comm_metrics['questions_asked']['questions_per_minute']} per minute
             
             STAGE INSIGHTS:
             {json.dumps(analytics['key_insights'], indent=2)}
@@ -862,6 +871,37 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                         "score": <score out of 100>,
                         "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
                         "description": "<Detailed feedback on closing statement and call to action>"
+                    }},
+                    "engagement": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on talk vs listen balance>",
+                        "talked_count": {comm_metrics['engagement']['talked_count']},
+                        "listened_count": {comm_metrics['engagement']['listened_count']},
+                        "talk_percentage": {comm_metrics['engagement']['talk_percentage']},
+                        "listen_percentage": {comm_metrics['engagement']['listen_percentage']}
+                    }},
+                    "fluency": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on speaking fluency and confidence>",
+                        "fillers": {comm_metrics['fluency']['filler_count']},
+                        "grammar": {comm_metrics['fluency']['grammar_issues']},
+                        "vocabulary": {comm_metrics['fluency']['vocabulary_richness']}
+                    }},
+                    "interactivity": {{
+                        "score": <score 0-10>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on conversation flow and interaction>",
+                        "conversation_turns": {comm_metrics['interactivity']['conversation_turns']},
+                        "turn_frequency": {comm_metrics['interactivity']['turn_frequency']}
+                    }},
+                    "questions_asked": {{
+                        "score": <score 0-10>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on question asking frequency and quality>",
+                        "total_questions": {comm_metrics['questions_asked']['founder_questions']},
+                        "questions_per_minute": {comm_metrics['questions_asked']['questions_per_minute']}
                     }}
                 }},
                 "strengths": [
@@ -880,10 +920,27 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                 "next_steps": [
                     "<immediate action item>",
                     ...
+                ],
+                "founder_performance": [
+                    {{
+                        "title": "<Performance aspect title>",
+                        "description": "<Detailed description of founder's performance in this area>"
+                    }},
+                    ...
+                ],
+                "what_worked": [
+                    "<Specific thing that worked well in the pitch>",
+                    ...
+                ],
+                "what_didnt_work": [
+                    "<Specific thing that didn't work well in the pitch>",
+                    ...
                 ]
             }}
             
-            Base your analysis on these 10 key categories:
+            Base your analysis on these 14 key categories:
+            
+            CONTENT CATEGORIES:
             1. HOOKS & STORY: Opening engagement, storytelling ability, emotional connection
             2. PROBLEM & URGENCY: Problem identification, market pain points, urgency demonstration
             3. SOLUTION & FIT: Solution clarity, product-market fit, value proposition
@@ -894,6 +951,17 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             8. TRACTION & VISION: Current progress, growth metrics, future roadmap
             9. FUNDING ASK: Funding requirements, use of funds, investment rationale
             10. CLOSING IMPACT: Call to action, memorable closing, investor engagement
+            
+            COMMUNICATION CATEGORIES:
+            11. ENGAGEMENT: How much you talked vs. how much you listened. Ideal balance is 70-80% founder talking, 20-30% listening/responding to investor questions.
+            12. FLUENCY: How smoothly and confidently you speak. Analyzed through fillers (um, uh, like), grammar issues, and vocabulary richness.
+            13. INTERACTIVITY: How frequently the conversation shifted between you and the investor, rated on a 0–10 scale. Higher scores indicate better conversational flow.
+            14. QUESTIONS ASKED: Number of questions asked per minute, rated on a 0–10 scale. Shows engagement and curiosity about investor perspective.
+            
+            ADDITIONAL ANALYSIS SECTIONS:
+            - FOUNDER PERFORMANCE: Specific aspects of founder's performance with titles and detailed descriptions (e.g., "Opener Effectiveness", "Confidence Level", "Storytelling Ability", "Technical Knowledge", "Vision Communication")
+            - WHAT WORKED: Specific positive elements that were effective in the pitch
+            - WHAT DIDN'T WORK: Specific areas that were ineffective or problematic in the pitch
             
             Rating Scale:
             - Need to Improve (0-39): Significant gaps, requires major work
@@ -954,11 +1022,96 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             formatted.append(f"{role}: {content}")
         return "\n".join(formatted)
     
+    def _calculate_communication_metrics(self, messages: List[BaseMessage]) -> Dict[str, Any]:
+        """Calculate communication and interaction metrics"""
+        
+        founder_messages = [msg for msg in messages if msg.__class__.__name__ == "HumanMessage"]
+        investor_messages = [msg for msg in messages if msg.__class__.__name__ == "AIMessage"]
+        
+        # 1. Engagement Analysis (Talk vs Listen ratio)
+        founder_word_count = sum(len(msg.content.split()) for msg in founder_messages)
+        investor_word_count = sum(len(msg.content.split()) for msg in investor_messages)
+        total_words = founder_word_count + investor_word_count
+        
+        talk_percentage = (founder_word_count / total_words * 100) if total_words > 0 else 0
+        listen_percentage = (investor_word_count / total_words * 100) if total_words > 0 else 0
+        
+        # 2. Fluency Analysis (estimate from text patterns)
+        total_founder_text = " ".join([msg.content for msg in founder_messages])
+        
+        # Count potential fillers (basic estimation)
+        filler_words = ['um', 'uh', 'like', 'you know', 'actually', 'basically', 'literally', 'so', 'well']
+        filler_count = sum(total_founder_text.lower().count(filler) for filler in filler_words)
+        
+        # Estimate grammar issues (very basic - repeated words, incomplete sentences)
+        sentences = total_founder_text.split('.')
+        grammar_issues = 0
+        for sentence in sentences:
+            words = sentence.strip().split()
+            if len(words) > 1:
+                # Check for repeated consecutive words
+                for i in range(len(words) - 1):
+                    if words[i].lower() == words[i + 1].lower():
+                        grammar_issues += 1
+        
+        # Vocabulary richness (unique words / total words)
+        all_founder_words = total_founder_text.lower().split()
+        unique_words = len(set(all_founder_words))
+        vocabulary_richness = (unique_words / len(all_founder_words)) if all_founder_words else 0
+        
+        # 3. Interactivity (conversation turns)
+        conversation_turns = 0
+        last_speaker = None
+        for msg in messages:
+            current_speaker = "Founder" if msg.__class__.__name__ == "HumanMessage" else "Investor"
+            if last_speaker and last_speaker != current_speaker:
+                conversation_turns += 1
+            last_speaker = current_speaker
+        
+        # 4. Questions Asked Analysis
+        founder_questions = 0
+        for msg in founder_messages:
+            founder_questions += msg.content.count('?')
+        
+        # Calculate session duration in minutes for questions per minute
+        session_duration_minutes = len(messages) * 0.5  # Rough estimate: 30 seconds per message
+        questions_per_minute = (founder_questions / session_duration_minutes) if session_duration_minutes > 0 else 0
+        
+        return {
+            "engagement": {
+                "talked_count": len(founder_messages),
+                "listened_count": len(investor_messages),
+                "talk_percentage": round(talk_percentage, 1),
+                "listen_percentage": round(listen_percentage, 1),
+                "founder_word_count": founder_word_count,
+                "investor_word_count": investor_word_count
+            },
+            "fluency": {
+                "filler_count": filler_count,
+                "grammar_issues": grammar_issues,
+                "vocabulary_richness": round(vocabulary_richness, 3),
+                "total_words": len(all_founder_words)
+            },
+            "interactivity": {
+                "conversation_turns": conversation_turns,
+                "total_messages": len(messages),
+                "turn_frequency": round(conversation_turns / len(messages), 2) if messages else 0
+            },
+            "questions_asked": {
+                "founder_questions": founder_questions,
+                "session_duration_minutes": round(session_duration_minutes, 1),
+                "questions_per_minute": round(questions_per_minute, 2)
+            }
+        }
+    
     def _generate_basic_analysis(self, state: Dict, analytics: Dict) -> Dict[str, Any]:
         """Generate basic analysis when AI analysis fails"""
         
         stages_completed = len(analytics['completed_stages'])
         total_insights = sum(len(insights) for insights in analytics['key_insights'].values())
+        
+        # Calculate communication metrics
+        comm_metrics = self._calculate_communication_metrics(state['messages'])
         
         # Calculate basic scores
         completion_score = (stages_completed / 9) * 40  # 40% for completion
@@ -1027,6 +1180,37 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                 "score": base_category_score - 10,
                 "rating": get_rating(base_category_score - 10),
                 "description": "Closing needs more impact and clear call to action"
+            },
+            "engagement": {
+                "score": min(100, max(0, 100 - abs(comm_metrics['engagement']['talk_percentage'] - 75) * 2)),
+                "rating": get_rating(min(100, max(0, 100 - abs(comm_metrics['engagement']['talk_percentage'] - 75) * 2))),
+                "description": f"Talk/Listen ratio: {comm_metrics['engagement']['talk_percentage']:.1f}% talking, {comm_metrics['engagement']['listen_percentage']:.1f}% listening",
+                "talked_count": comm_metrics['engagement']['talked_count'],
+                "listened_count": comm_metrics['engagement']['listened_count'],
+                "talk_percentage": comm_metrics['engagement']['talk_percentage'],
+                "listen_percentage": comm_metrics['engagement']['listen_percentage']
+            },
+            "fluency": {
+                "score": max(0, 100 - (comm_metrics['fluency']['filler_count'] * 5) - (comm_metrics['fluency']['grammar_issues'] * 10) + (comm_metrics['fluency']['vocabulary_richness'] * 50)),
+                "rating": get_rating(max(0, 100 - (comm_metrics['fluency']['filler_count'] * 5) - (comm_metrics['fluency']['grammar_issues'] * 10) + (comm_metrics['fluency']['vocabulary_richness'] * 50))),
+                "description": f"Fluency analysis: {comm_metrics['fluency']['filler_count']} fillers, {comm_metrics['fluency']['grammar_issues']} grammar issues, {comm_metrics['fluency']['vocabulary_richness']:.3f} vocabulary richness",
+                "fillers": comm_metrics['fluency']['filler_count'],
+                "grammar": comm_metrics['fluency']['grammar_issues'],
+                "vocabulary": comm_metrics['fluency']['vocabulary_richness']
+            },
+            "interactivity": {
+                "score": min(10, comm_metrics['interactivity']['turn_frequency'] * 10),
+                "rating": get_rating(min(100, comm_metrics['interactivity']['turn_frequency'] * 100)),
+                "description": f"Conversation flow: {comm_metrics['interactivity']['conversation_turns']} turns with {comm_metrics['interactivity']['turn_frequency']:.2f} turn frequency",
+                "conversation_turns": comm_metrics['interactivity']['conversation_turns'],
+                "turn_frequency": comm_metrics['interactivity']['turn_frequency']
+            },
+            "questions_asked": {
+                "score": min(10, comm_metrics['questions_asked']['questions_per_minute'] * 5),
+                "rating": get_rating(min(100, comm_metrics['questions_asked']['questions_per_minute'] * 50)),
+                "description": f"Question engagement: {comm_metrics['questions_asked']['founder_questions']} questions at {comm_metrics['questions_asked']['questions_per_minute']:.2f} per minute",
+                "total_questions": comm_metrics['questions_asked']['founder_questions'],
+                "questions_per_minute": comm_metrics['questions_asked']['questions_per_minute']
             }
         }
         
@@ -1065,6 +1249,34 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
                 "Complete remaining pitch stages" if stages_completed < 9 else "Practice with different investor personas",
                 "Gather more specific metrics and data",
                 "Refine value proposition and differentiation"
+            ],
+            "founder_performance": [
+                {
+                    "title": "Opener Effectiveness",
+                    "description": f"The founder introduced themselves and company but {'could improve engagement' if overall_score < 60 else 'showed good initial engagement'}."
+                },
+                {
+                    "title": "Stage Completion",
+                    "description": f"Completed {stages_completed} out of 9 pitch stages, {'showing partial commitment' if stages_completed < 5 else 'demonstrating good follow-through'}."
+                },
+                {
+                    "title": "Communication Style",
+                    "description": f"Talk/listen ratio of {comm_metrics['engagement']['talk_percentage']:.1f}%/{comm_metrics['engagement']['listen_percentage']:.1f}% {'needs balancing' if abs(comm_metrics['engagement']['talk_percentage'] - 75) > 15 else 'shows good balance'}."
+                },
+                {
+                    "title": "Question Engagement",
+                    "description": f"Asked {comm_metrics['questions_asked']['founder_questions']} questions during the session, {'showing limited curiosity' if comm_metrics['questions_asked']['founder_questions'] < 2 else 'demonstrating good investor engagement'}."
+                }
+            ],
+            "what_worked": [
+                f"Completed {stages_completed} pitch stages showing commitment to the process",
+                f"Maintained {comm_metrics['interactivity']['turn_frequency']:.2f} turn frequency indicating good conversational flow" if comm_metrics['interactivity']['turn_frequency'] > 0.5 else "Engaged in structured conversation",
+                f"Achieved {comm_metrics['fluency']['vocabulary_richness']:.3f} vocabulary richness showing articulate communication" if comm_metrics['fluency']['vocabulary_richness'] > 0.7 else "Communicated core business concepts clearly"
+            ],
+            "what_didnt_work": [
+                f"Only completed {stages_completed}/9 stages, missing key pitch elements" if stages_completed < 9 else "Could benefit from more detailed responses in some areas",
+                f"Used {comm_metrics['fluency']['filler_count']} filler words, affecting speech fluency" if comm_metrics['fluency']['filler_count'] > 5 else "Minor areas for communication improvement",
+                f"Asked only {comm_metrics['questions_asked']['founder_questions']} questions, showing limited investor engagement" if comm_metrics['questions_asked']['founder_questions'] < 3 else "Could ask more strategic questions about investor perspective"
             ]
         }
     

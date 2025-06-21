@@ -18,6 +18,29 @@ class CategoryScore(BaseModel):
     rating: PitchRating
     description: str
 
+class EngagementScore(CategoryScore):
+    talked_count: Optional[int] = None
+    listened_count: Optional[int] = None
+    talk_percentage: Optional[float] = None
+    listen_percentage: Optional[float] = None
+
+class FluencyScore(CategoryScore):
+    fillers: Optional[int] = None
+    grammar: Optional[int] = None
+    vocabulary: Optional[float] = None
+
+class InteractivityScore(CategoryScore):
+    conversation_turns: Optional[int] = None
+    turn_frequency: Optional[float] = None
+
+class QuestionsAskedScore(CategoryScore):
+    total_questions: Optional[int] = None
+    questions_per_minute: Optional[float] = None
+
+class FounderPerformance(BaseModel):
+    title: str
+    description: str
+
 class Strength(BaseModel):
     area: str
     description: str
@@ -55,6 +78,11 @@ class PitchAnalysis(BaseModel):
     key_recommendations: List[str]
     investor_perspective: str
     next_steps: List[str]
+    
+    # New analysis sections
+    founder_performance: Optional[List[FounderPerformance]] = []
+    what_worked: Optional[List[str]] = []
+    what_didnt_work: Optional[List[str]] = []
     
     # Metadata
     analysis_version: str = "1.0"

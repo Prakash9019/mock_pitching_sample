@@ -925,11 +925,15 @@ async def get_formatted_pitch_report(session_id: str):
                 "pitch_readiness": analysis.get("pitch_readiness", "Unknown"),
                 "stage_scores": analysis.get("stage_scores", {})
             },
+            "category_scores": analysis.get("category_scores", {}),
             "feedback": {
                 "strengths": analysis.get("strengths", []),
                 "weaknesses": analysis.get("weaknesses", []),
                 "key_recommendations": analysis.get("key_recommendations", []),
-                "next_steps": analysis.get("next_steps", [])
+                "next_steps": analysis.get("next_steps", []),
+                "founder_performance": analysis.get("founder_performance", []),
+                "what_worked": analysis.get("what_worked", []),
+                "what_didnt_work": analysis.get("what_didnt_work", [])
             },
             "insights": {
                 "investor_perspective": analysis.get("investor_perspective", ""),

@@ -99,6 +99,140 @@
             </div>
         </div>
 
+        <!-- Communication Analysis -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-900 mb-6">🗣️ Communication Analysis</h2>
+            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                
+                <!-- Engagement -->
+                <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
+                    <div class="flex items-center mb-3">
+                        <span class="text-2xl mr-2">💬</span>
+                        <h3 class="font-semibold text-blue-800">Engagement</h3>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-blue-600">Talked:</span>
+                            <span id="talkedCount" class="font-semibold">-</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-blue-600">Listened:</span>
+                            <span id="listenedCount" class="font-semibold">-</span>
+                        </div>
+                        <div class="mt-2 pt-2 border-t border-blue-200">
+                            <div class="text-center">
+                                <div id="engagementScore" class="text-2xl font-bold text-blue-700">-</div>
+                                <div id="engagementRating" class="text-xs text-blue-600 font-medium">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fluency -->
+                <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
+                    <div class="flex items-center mb-3">
+                        <span class="text-2xl mr-2">🎯</span>
+                        <h3 class="font-semibold text-green-800">Fluency</h3>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-green-600">Fillers:</span>
+                            <span id="fillersCount" class="font-semibold">-</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-green-600">Grammar:</span>
+                            <span id="grammarIssues" class="font-semibold">-</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-green-600">Vocabulary:</span>
+                            <span id="vocabularyScore" class="font-semibold">-</span>
+                        </div>
+                        <div class="mt-2 pt-2 border-t border-green-200">
+                            <div class="text-center">
+                                <div id="fluencyScore" class="text-2xl font-bold text-green-700">-</div>
+                                <div id="fluencyRating" class="text-xs text-green-600 font-medium">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Interactivity -->
+                <div class="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4">
+                    <div class="flex items-center mb-3">
+                        <span class="text-2xl mr-2">🔄</span>
+                        <h3 class="font-semibold text-purple-800">Interactivity</h3>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-purple-600">Turns:</span>
+                            <span id="conversationTurns" class="font-semibold">-</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-purple-600">Frequency:</span>
+                            <span id="turnFrequency" class="font-semibold">-</span>
+                        </div>
+                        <div class="mt-2 pt-2 border-t border-purple-200">
+                            <div class="text-center">
+                                <div id="interactivityScore" class="text-2xl font-bold text-purple-700">-</div>
+                                <div id="interactivityRating" class="text-xs text-purple-600 font-medium">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Questions Asked -->
+                <div class="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-4">
+                    <div class="flex items-center mb-3">
+                        <span class="text-2xl mr-2">❓</span>
+                        <h3 class="font-semibold text-orange-800">Questions Asked</h3>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-orange-600">Total:</span>
+                            <span id="totalQuestions" class="font-semibold">-</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-orange-600">Per Min:</span>
+                            <span id="questionsPerMinute" class="font-semibold">-</span>
+                        </div>
+                        <div class="mt-2 pt-2 border-t border-orange-200">
+                            <div class="text-center">
+                                <div id="questionsScore" class="text-2xl font-bold text-orange-700">-</div>
+                                <div id="questionsRating" class="text-xs text-orange-600 font-medium">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Founder Performance -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-900 mb-6">👤 Founder Performance</h2>
+            <div id="founderPerformanceList" class="space-y-4">
+                <div class="text-gray-500">Loading founder performance analysis...</div>
+            </div>
+        </div>
+
+        <!-- What Worked vs What Didn't Work -->
+        <div class="grid md:grid-cols-2 gap-8 mb-8">
+            <!-- What Worked -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-xl font-semibold text-green-800 mb-4">✅ What Worked</h3>
+                <ul id="whatWorkedList" class="space-y-3">
+                    <li class="text-gray-500">Loading what worked...</li>
+                </ul>
+            </div>
+
+            <!-- What Didn't Work -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-xl font-semibold text-red-800 mb-4">❌ What Didn't Work</h3>
+                <ul id="whatDidntWorkList" class="space-y-3">
+                    <li class="text-gray-500">Loading what didn't work...</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Recommendations and Next Steps -->
         <div class="grid md:grid-cols-2 gap-8 mb-8">
             <!-- Key Recommendations -->
@@ -264,12 +398,108 @@ function displayAnalysisReport(report) {
         nextStepsList.innerHTML = '<li class="text-gray-500">No specific next steps available yet.</li>';
     }
     
+    // Update founder performance
+    const founderPerformanceList = document.getElementById('founderPerformanceList');
+    founderPerformanceList.innerHTML = '';
+    if (report.feedback.founder_performance && report.feedback.founder_performance.length > 0) {
+        report.feedback.founder_performance.forEach(performance => {
+            const div = document.createElement('div');
+            div.className = 'bg-gray-50 rounded-lg p-4 border-l-4 border-blue-500';
+            div.innerHTML = `
+                <h4 class="font-semibold text-gray-800 mb-2">${performance.title}</h4>
+                <p class="text-gray-600 text-sm">${performance.description}</p>
+            `;
+            founderPerformanceList.appendChild(div);
+        });
+    } else {
+        founderPerformanceList.innerHTML = '<div class="text-gray-500">No specific founder performance analysis available yet.</div>';
+    }
+    
+    // Update what worked
+    const whatWorkedList = document.getElementById('whatWorkedList');
+    whatWorkedList.innerHTML = '';
+    if (report.feedback.what_worked && report.feedback.what_worked.length > 0) {
+        report.feedback.what_worked.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'flex items-start mb-2';
+            li.innerHTML = `
+                <span class="text-green-500 mr-2 mt-1">✓</span>
+                <span class="text-green-700">${item}</span>
+            `;
+            whatWorkedList.appendChild(li);
+        });
+    } else {
+        whatWorkedList.innerHTML = '<li class="text-gray-500">No specific positive elements identified yet.</li>';
+    }
+    
+    // Update what didn't work
+    const whatDidntWorkList = document.getElementById('whatDidntWorkList');
+    whatDidntWorkList.innerHTML = '';
+    if (report.feedback.what_didnt_work && report.feedback.what_didnt_work.length > 0) {
+        report.feedback.what_didnt_work.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'flex items-start mb-2';
+            li.innerHTML = `
+                <span class="text-red-500 mr-2 mt-1">•</span>
+                <span class="text-red-700">${item}</span>
+            `;
+            whatDidntWorkList.appendChild(li);
+        });
+    } else {
+        whatDidntWorkList.innerHTML = '<li class="text-gray-500">No specific problem areas identified yet.</li>';
+    }
+    
     // Update investor perspective
     document.getElementById('investorPerspective').textContent = report.insights.investor_perspective || 'No investor perspective available yet.';
+    
+    // Update communication analysis
+    updateCommunicationAnalysis(report);
     
     // Create stage scores chart
     if (report.scores.stage_scores) {
         createStageScoresChart(report.scores.stage_scores);
+    }
+}
+
+function updateCommunicationAnalysis(report) {
+    // Check if category_scores exists and has communication data
+    const categoryScores = report.category_scores || report.scores?.category_scores || {};
+    
+    // Update Engagement
+    const engagement = categoryScores.engagement;
+    if (engagement) {
+        document.getElementById('talkedCount').textContent = engagement.talked_count || '-';
+        document.getElementById('listenedCount').textContent = engagement.listened_count || '-';
+        document.getElementById('engagementScore').textContent = engagement.score || '-';
+        document.getElementById('engagementRating').textContent = engagement.rating || '-';
+    }
+    
+    // Update Fluency
+    const fluency = categoryScores.fluency;
+    if (fluency) {
+        document.getElementById('fillersCount').textContent = fluency.fillers || '-';
+        document.getElementById('grammarIssues').textContent = fluency.grammar || '-';
+        document.getElementById('vocabularyScore').textContent = fluency.vocabulary ? fluency.vocabulary.toFixed(3) : '-';
+        document.getElementById('fluencyScore').textContent = fluency.score || '-';
+        document.getElementById('fluencyRating').textContent = fluency.rating || '-';
+    }
+    
+    // Update Interactivity
+    const interactivity = categoryScores.interactivity;
+    if (interactivity) {
+        document.getElementById('conversationTurns').textContent = interactivity.conversation_turns || '-';
+        document.getElementById('turnFrequency').textContent = interactivity.turn_frequency ? interactivity.turn_frequency.toFixed(2) : '-';
+        document.getElementById('interactivityScore').textContent = interactivity.score || '-';
+        document.getElementById('interactivityRating').textContent = interactivity.rating || '-';
+    }
+    
+    // Update Questions Asked
+    const questionsAsked = categoryScores.questions_asked;
+    if (questionsAsked) {
+        document.getElementById('totalQuestions').textContent = questionsAsked.total_questions || '-';
+        document.getElementById('questionsPerMinute').textContent = questionsAsked.questions_per_minute ? questionsAsked.questions_per_minute.toFixed(2) : '-';
+        document.getElementById('questionsScore').textContent = questionsAsked.score || '-';
+        document.getElementById('questionsRating').textContent = questionsAsked.rating || '-';
     }
 }
 
