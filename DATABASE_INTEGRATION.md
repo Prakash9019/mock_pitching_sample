@@ -73,19 +73,25 @@ New database management endpoints added:
 {
   "_id": "ObjectId",
   "session_id": "string",
-  "timestamp": "datetime",
-  "message_type": "string",
-  "content": "string",
-  "persona": "string",
-  "audio_file": "string",
-  "transcription_confidence": "number"
+  "created_at": "datetime",
+  "updated_at": "datetime",
+  "messages": [
+    {
+      "timestamp": "datetime",
+      "message_type": "string",
+      "content": "string",
+      "persona": "string",
+      "audio_file": "string",
+      "transcription_confidence": "number"
+    }
+  ]
 }
 ```
 
 ## Database Indexes
 - **pitch_sessions**: session_id (unique), created_at, founder_name, company_name
 - **pitch_analyses**: session_id (unique), generated_at, overall_score
-- **conversation_logs**: session_id, timestamp
+- **conversation_logs**: session_id (unique), created_at, updated_at
 
 ## Configuration
 

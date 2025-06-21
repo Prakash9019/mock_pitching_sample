@@ -108,14 +108,21 @@ class PitchSession(BaseModel):
     analysis_id: Optional[str] = None
     has_analysis: bool = False
 
-class ConversationLog(BaseModel):
-    session_id: str
+class ConversationMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     message_type: str  # user, ai, system
     content: str
     persona: Optional[str] = None
     audio_file: Optional[str] = None
     transcription_confidence: Optional[float] = None
+
+class ConversationLog(BaseModel):
+    session_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    messages: List[ConversationMessage] = []
+
+
 
 class QuickAnalytics(BaseModel):
     session_id: str

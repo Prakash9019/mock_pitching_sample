@@ -16,17 +16,18 @@ This comprehensive guide provides everything you need to integrate the AI Mock I
 6. [Speech-to-Text Integration](#speech-to-text-integration)
 7. [Text-to-Speech Integration](#text-to-speech-integration)
 8. [Session Management](#session-management)
-9. [Analytics & Reporting](#analytics--reporting)
-10. [Step-by-Step Implementation](#step-by-step-implementation)
-11. [React Complete Example](#react-complete-example)
-12. [Vue.js Complete Example](#vuejs-complete-example)
-13. [Angular Complete Example](#angular-complete-example)
-14. [Error Handling](#error-handling)
-15. [Performance Optimization](#performance-optimization)
-16. [Security Considerations](#security-considerations)
-17. [Testing Guide](#testing-guide)
-18. [Deployment Guide](#deployment-guide)
-19. [Best Practices](#best-practices)
+9. [Session Ending & Analysis](#session-ending--analysis)
+10. [Analytics & Reporting](#analytics--reporting)
+11. [Step-by-Step Implementation](#step-by-step-implementation)
+12. [React Complete Example](#react-complete-example)
+13. [Vue.js Complete Example](#vuejs-complete-example)
+14. [Angular Complete Example](#angular-complete-example)
+15. [Error Handling](#error-handling)
+16. [Performance Optimization](#performance-optimization)
+17. [Security Considerations](#security-considerations)
+18. [Testing Guide](#testing-guide)
+19. [Deployment Guide](#deployment-guide)
+20. [Best Practices](#best-practices)
 
 ---
 
@@ -77,7 +78,7 @@ npm install lodash moment uuid
 | Method | Endpoint | Description | Request Body | Response |
 |--------|----------|-------------|--------------|----------|
 | `GET` | `/api/personas` | Get all available investor personas | - | `{personas: {...}}` |
-| `POST` | `/api/pitch/end/{session_id}` | End pitch session | - | `{success: boolean}` |
+| `POST` | `/api/pitch/end/{session_id}` | **End pitch session and generate comprehensive analysis** | `{reason?: string}` | `{success: boolean, message: string, analysis: object}` |
 | `GET` | `/api/pitch/analytics/{session_id}` | Get session analytics | - | `{analytics: {...}}` |
 | `GET` | `/api/pitch/analysis/{session_id}` | Get detailed analysis | - | `{analysis: {...}}` |
 | `GET` | `/api/pitch/report/{session_id}` | Get formatted report | - | `{report: {...}}` |
@@ -1208,23 +1209,29 @@ class SessionManager {
       // Leave session via socket
       socketService.leaveSession(sessionId);
 
-      // End session via API
+      // End session via API and get comprehensive analysis
       const response = await fetch(`/api/pitch/end/${sessionId}`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ reason: 'user_ended' })
       });
 
       if (!response.ok) {
         throw new Error('Failed to end session');
       }
 
-      // Get final analytics
-      const analytics = await this.getSessionAnalytics(sessionId);
+      const data = await response.json();
+      
+      // The analysis is included in the response
+      const analysis = data.analysis;
       
       // Update session data
       this.currentSession.endTime = new Date();
       this.currentSession.duration = Date.now() - this.sessionStartTime;
       this.currentSession.status = 'completed';
-      this.sessionData.analysis = analytics;
+      this.sessionData.analysis = analysis;
 
       // Add to history
       this.sessionHistory.push({
@@ -1238,7 +1245,11 @@ class SessionManager {
       this.sessionStartTime = null;
 
       console.log('✅ Session ended:', sessionId);
-      return analytics;
+      return {
+        success: true,
+        analysis: analysis,
+        sessionId: sessionId
+      };
     } catch (error) {
       console.error('❌ Error ending session:', error);
       throw error;
@@ -1460,6 +1471,421 @@ const useSessionManager = () => {
   };
 };
 ```
+
+---
+
+## Session Ending & Analysis
+
+### 🎯 Complete Guide to Ending Sessions and Getting Analysis
+
+This section provides a comprehensive guide on how to properly end pitch sessions, manage WebSocket connections, and retrieve detailed analysis reports.
+
+#### Understanding the Session Ending Process
+
+When ending a pitch session, there are **two separate operations** you need to handle:
+
+1. **WebSocket Connection Management** - Cleanly disconnect from real-time communication
+2. **Session Analysis Generation** - End the session and get comprehensive analysis via REST API
+
+#### 🔄 The Complete Session Ending Workflow
+
+```javascript
+// Complete session ending workflow
+const endPitchSession = async (sessionId, reason = 'user_ended') => {
+  try {
+    console.log('🔄 Starting session ending process...');
+    
+    // Step 1: Disconnect WebSocket (stops real-time communication)
+    if (socket && socket.connected) {
+      socket.disconnect();
+      console.log('✅ WebSocket disconnected');
+    }
+    
+    // Step 2: End session and get comprehensive analysis via REST API
+    const response = await fetch(`https://ai-mock-pitching-427457295403.europe-west1.run.app/api/pitch/end/${sessionId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: reason })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to end session: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('✅ Session ended successfully');
+    
+    // Step 3: Process the comprehensive analysis
+    if (data.success && data.analysis) {
+      console.log('📊 Analysis received:', data.analysis);
+      
+      // The analysis contains:
+      // - Overall performance metrics
+      // - Detailed feedback and insights
+      // - Stage-by-stage breakdown
+      // - Recommendations for improvement
+      // - Session statistics and duration
+      
+      return {
+        success: true,
+        analysis: data.analysis,
+        message: data.message
+      };
+    }
+    
+    throw new Error('No analysis data received');
+    
+  } catch (error) {
+    console.error('❌ Error ending session:', error);
+    throw error;
+  }
+};
+```
+
+#### 📡 WebSocket Session Management
+
+```javascript
+// WebSocket session management
+class WebSocketSessionManager {
+  constructor(socketService) {
+    this.socketService = socketService;
+    this.currentSessionId = null;
+    this.isInSession = false;
+  }
+  
+  // Join a session for real-time communication
+  joinSession(sessionId) {
+    try {
+      if (!this.socketService.isConnected) {
+        throw new Error('Socket not connected');
+      }
+      
+      this.socketService.joinSession(sessionId);
+      this.currentSessionId = sessionId;
+      this.isInSession = true;
+      
+      console.log(`✅ Joined WebSocket session: ${sessionId}`);
+    } catch (error) {
+      console.error('❌ Failed to join session:', error);
+      throw error;
+    }
+  }
+  
+  // Disconnect from current session (stops real-time communication)
+  leaveSession() {
+    try {
+      if (this.socketService.socket && this.socketService.socket.connected) {
+        this.socketService.socket.disconnect();
+        console.log(`✅ WebSocket disconnected from session: ${this.currentSessionId}`);
+      }
+      
+      this.currentSessionId = null;
+      this.isInSession = false;
+    } catch (error) {
+      console.error('❌ Failed to disconnect from session:', error);
+    }
+  }
+  
+  // Clean disconnect (call this when component unmounts)
+  disconnect() {
+    this.leaveSession();
+    this.socketService.disconnect();
+    console.log('✅ WebSocket disconnected');
+  }
+}
+```
+
+#### 🎯 The `/api/pitch/end/{session_id}` Endpoint
+
+**Purpose**: This endpoint is the **primary way to end a pitch session and get comprehensive analysis**.
+
+**What it does**:
+- ✅ Formally ends the pitch session
+- ✅ Generates detailed performance analysis
+- ✅ Saves analysis to database
+- ✅ Updates session status
+- ✅ Returns complete analysis report
+
+**What it does NOT do**:
+- ❌ Does NOT handle WebSocket disconnections (that's separate)
+- ❌ Does NOT just return success/failure (it returns full analysis)
+
+#### 📊 Request & Response Details
+
+**Request**:
+```javascript
+POST /api/pitch/end/{session_id}
+Content-Type: application/json
+
+{
+  "reason": "user_ended"  // Optional: "user_ended", "completed", "timeout", etc.
+}
+```
+
+**Response**:
+```javascript
+{
+  "success": true,
+  "message": "Session ended successfully",
+  "analysis": {
+    "session_id": "session_123...",
+    "session_duration_minutes": 15.5,
+    "overall_score": 8.2,
+    "performance_metrics": {
+      "clarity_score": 8.5,
+      "confidence_score": 7.8,
+      "engagement_score": 8.0,
+      "structure_score": 8.5
+    },
+    "detailed_feedback": {
+      "strengths": ["Clear value proposition", "Good market analysis"],
+      "areas_for_improvement": ["Financial projections need more detail"],
+      "specific_recommendations": ["Practice the closing more"]
+    },
+    "stage_breakdown": {
+      "introduction": { "score": 8.0, "feedback": "..." },
+      "problem_statement": { "score": 8.5, "feedback": "..." },
+      "solution": { "score": 7.5, "feedback": "..." }
+      // ... more stages
+    },
+    "conversation_summary": "...",
+    "key_insights": ["...", "..."],
+    "next_steps": ["...", "..."]
+  }
+}
+```
+
+#### 🔧 Complete Implementation Examples
+
+**React Hook Implementation**:
+```javascript
+const usePitchSession = () => {
+  const [sessionId, setSessionId] = useState(null);
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const socketService = useRef(new SocketService());
+  const wsManager = useRef(null);
+  
+  // Initialize WebSocket session manager
+  useEffect(() => {
+    wsManager.current = new WebSocketSessionManager(socketService.current);
+    
+    return () => {
+      // Cleanup on unmount
+      wsManager.current?.disconnect();
+    };
+  }, []);
+  
+  const startSession = async (founderName, companyName, persona) => {
+    try {
+      setIsLoading(true);
+      
+      // Connect to WebSocket
+      socketService.current.connect();
+      
+      // Generate session ID
+      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Join WebSocket session
+      wsManager.current.joinSession(newSessionId);
+      
+      setSessionId(newSessionId);
+      setIsSessionActive(true);
+      
+      console.log('✅ Session started:', newSessionId);
+      
+    } catch (error) {
+      console.error('❌ Failed to start session:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const endSession = async (reason = 'user_ended') => {
+    if (!sessionId) return null;
+    
+    try {
+      setIsLoading(true);
+      
+      // Step 1: Leave WebSocket session
+      wsManager.current.leaveSession();
+      
+      // Step 2: End session and get analysis
+      const result = await endPitchSession(sessionId, reason);
+      
+      // Step 3: Update state
+      setIsSessionActive(false);
+      setAnalysis(result.analysis);
+      
+      console.log('✅ Session ended with analysis');
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Failed to end session:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return {
+    sessionId,
+    isSessionActive,
+    analysis,
+    isLoading,
+    startSession,
+    endSession,
+    socketService: socketService.current
+  };
+};
+```
+
+**Vue.js Composition API Implementation**:
+```javascript
+import { ref, onUnmounted } from 'vue';
+
+export function usePitchSession() {
+  const sessionId = ref(null);
+  const isSessionActive = ref(false);
+  const analysis = ref(null);
+  const isLoading = ref(false);
+  
+  let socketService = null;
+  let wsManager = null;
+  
+  const initializeServices = () => {
+    socketService = new SocketService();
+    wsManager = new WebSocketSessionManager(socketService);
+  };
+  
+  const startSession = async (founderName, companyName, persona) => {
+    try {
+      isLoading.value = true;
+      
+      if (!socketService) initializeServices();
+      
+      socketService.connect();
+      
+      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      wsManager.joinSession(newSessionId);
+      
+      sessionId.value = newSessionId;
+      isSessionActive.value = true;
+      
+    } catch (error) {
+      console.error('Failed to start session:', error);
+      throw error;
+    } finally {
+      isLoading.value = false;
+    }
+  };
+  
+  const endSession = async (reason = 'user_ended') => {
+    if (!sessionId.value) return null;
+    
+    try {
+      isLoading.value = true;
+      
+      wsManager.leaveSession();
+      const result = await endPitchSession(sessionId.value, reason);
+      
+      isSessionActive.value = false;
+      analysis.value = result.analysis;
+      
+      return result;
+    } catch (error) {
+      console.error('Failed to end session:', error);
+      throw error;
+    } finally {
+      isLoading.value = false;
+    }
+  };
+  
+  // Cleanup on component unmount
+  onUnmounted(() => {
+    if (wsManager) {
+      wsManager.disconnect();
+    }
+  });
+  
+  return {
+    sessionId,
+    isSessionActive,
+    analysis,
+    isLoading,
+    startSession,
+    endSession
+  };
+}
+```
+
+#### ⚠️ Important Best Practices
+
+1. **Always handle both WebSocket and REST operations**:
+   ```javascript
+   // ✅ Correct approach
+   wsManager.leaveSession();           // Stop real-time communication
+   const analysis = await endPitchSession(sessionId);  // Get analysis
+   
+   // ❌ Wrong approach
+   socketService.disconnect();         // Only disconnects WebSocket
+   // Missing: No analysis retrieval
+   ```
+
+2. **Handle errors gracefully**:
+   ```javascript
+   try {
+     wsManager.leaveSession();
+   } catch (wsError) {
+     console.warn('WebSocket leave failed:', wsError);
+     // Continue with REST API call even if WebSocket fails
+   }
+   
+   try {
+     const analysis = await endPitchSession(sessionId);
+     return analysis;
+   } catch (apiError) {
+     console.error('Failed to get analysis:', apiError);
+     throw apiError;
+   }
+   ```
+
+3. **Clean up resources**:
+   ```javascript
+   // In React useEffect cleanup
+   useEffect(() => {
+     return () => {
+       wsManager.current?.disconnect();
+     };
+   }, []);
+   
+   // In Vue onUnmounted
+   onUnmounted(() => {
+     wsManager?.disconnect();
+   });
+   ```
+
+4. **Use the analysis data effectively**:
+   ```javascript
+   const result = await endSession();
+   if (result?.analysis) {
+     // Display overall score
+     setOverallScore(result.analysis.overall_score);
+     
+     // Show detailed feedback
+     setFeedback(result.analysis.detailed_feedback);
+     
+     // Display stage-by-stage breakdown
+     setStageBreakdown(result.analysis.stage_breakdown);
+     
+     // Show recommendations
+     setRecommendations(result.analysis.detailed_feedback.specific_recommendations);
+   }
+   ```
 
 ---
 

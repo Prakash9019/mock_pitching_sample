@@ -24,8 +24,11 @@ from app.services.enhanced_text_to_speech import convert_text_to_speech_with_per
 # Import LangGraph workflow and improved AI agent
 from app.services.langgraph_workflow import (
     start_pitch_session as start_practice_session,
+    start_pitch_session_async,
     start_pitch_session_with_message,
     process_pitch_message as handle_practice_message,
+    process_pitch_message_async,
+    end_pitch_session_async,
     get_pitch_workflow,
     initialize_pitch_workflow,
     generate_pitch_analysis_report,
@@ -108,7 +111,7 @@ db_service: Optional[DatabaseService] = None
 
 # Database startup and shutdown events
 @fastapi_app.on_event("startup")
-async def startup_event():
+async def startup_database():
     """Initialize database connection on startup"""
     global db_service
     try:
@@ -118,10 +121,11 @@ async def startup_event():
         logger.info("Database service initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
-        raise
+        # Don't raise here to allow app to start even if DB is unavailable
+        db_service = None
 
 @fastapi_app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown_database():
     """Close database connection on shutdown"""
     try:
         await close_mongo_connection()
@@ -276,11 +280,21 @@ async def get_session(session_id: str):
 @fastapi_app.get("/health")
 async def health_check():
     """Health check endpoint for Docker healthcheck and load balancers."""
+    # Check database health
+    db_healthy = False
+    if db_service and db_service.db:
+        try:
+            from app.database import db_manager
+            db_healthy = await db_manager.health_check()
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+    
     return {
-        "status": "healthy",
+        "status": "healthy" if db_healthy else "degraded",
         "timestamp": datetime.now().isoformat(),
         "service": "AI Mock Investor Pitch",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "database": "healthy" if db_healthy else "unavailable"
     }
 
 # Memory stats endpoint removed - focusing on audio conversation
@@ -363,7 +377,7 @@ pitch_workflow = None
 conversation_states = {}
 
 @fastapi_app.on_event("startup")
-async def startup_event():
+async def startup_ai_systems():
     """Initialize all AI agents and workflows when the application starts"""
     global ai_agent, pitch_workflow
     
@@ -372,14 +386,16 @@ async def startup_event():
         initialize_improved_agent()
         logger.info("Improved AI Agent initialized successfully")
         
-        # Initialize the LangGraph workflow
-        initialize_pitch_workflow()
+        # Initialize the LangGraph workflow with database service
+        initialize_pitch_workflow(db_service)
         pitch_workflow = get_pitch_workflow()
         logger.info("LangGraph workflow initialized successfully")
         
     except Exception as e:
         logger.error(f"Failed to initialize AI systems: {str(e)}", exc_info=True)
-        raise
+        # Don't raise here to allow app to start even if AI systems fail
+        ai_agent = None
+        pitch_workflow = None
 
 @fastapi_app.post("/api/conversation/start")
 async def start_conversation(persona: str = "friendly"):
@@ -606,26 +622,32 @@ async def start_pitch_practice(
                 detail=f"Invalid system. Choose from: {', '.join(valid_systems)}"
             )
         
-        # Start the session
-        session_data = start_practice_session(system, persona)
+        # Generate a unique session ID
+        import uuid
+        session_id = str(uuid.uuid4())
+        
+        # Start the session based on system type
+        if system == "workflow":
+            # Use async workflow function for proper database integration
+            session_data = await start_pitch_session_async(session_id, persona)
+        else:
+            # For improved system, use the old method and manually save to database
+            session_data = start_improved_conversation(session_id, persona)
+            
+            # Create database record for improved system
+            if db_service and session_id:
+                try:
+                    await db_service.create_session({
+                        "session_id": session_id,
+                        "persona_used": persona,
+                        "status": "active"
+                    })
+                    logger.info(f"Created database record for session: {session_id}")
+                except Exception as db_error:
+                    logger.error(f"Failed to create database record for session: {db_error}")
         
         if "error" in session_data:
             raise HTTPException(status_code=500, detail=session_data["error"])
-        
-        session_id = session_data.get("session_id")
-        
-        # Create database record for the session
-        if db_service and session_id:
-            try:
-                await db_service.create_session({
-                    "session_id": session_id,
-                    "persona_used": persona,
-                    "status": "active"
-                })
-                logger.info(f"Created database record for session: {session_id}")
-            except Exception as db_error:
-                logger.error(f"Failed to create database record for session: {db_error}")
-                # Continue anyway, don't fail the session start
         
         logger.info(f"Started {system} pitch session with {persona} persona: {session_id}")
         
@@ -687,8 +709,8 @@ async def process_pitch_message(
                 }
             }
         else:
-            # Use the LangGraph workflow
-            response_data = handle_practice_message(session_id, message)
+            # Use the LangGraph workflow with database integration
+            response_data = await process_pitch_message_async(session_id, message)
             if "error" in response_data:
                 raise HTTPException(status_code=404, detail=response_data["error"])
             
@@ -836,12 +858,12 @@ async def get_pitch_analysis_report(session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to generate analysis: {str(e)}")
 
 @fastapi_app.post("/api/pitch/end/{session_id}")
-async def end_pitch_session(session_id: str, reason: str = "user_ended"):
+async def end_pitch_session(session_id: str, request: Request):
     """End pitch session and generate comprehensive analysis
     
     Args:
         session_id: Session identifier
-        reason: Reason for ending session (user_ended, completed, timeout, etc.)
+        request: Request object containing optional reason in body
     
     Returns:
         Comprehensive pitch analysis report
@@ -853,26 +875,28 @@ async def end_pitch_session(session_id: str, reason: str = "user_ended"):
         if not db_service:
             raise HTTPException(status_code=500, detail="Database service not available")
         
-        # End the session and generate analysis
-        analysis = end_pitch_session_with_analysis(session_id, reason)
-        
-        if "error" in analysis:
-            raise HTTPException(status_code=404, detail=analysis["error"])
-        
-        # Save the analysis to database
+        # Parse request body to get reason (optional)
+        reason = "user_ended"  # default
         try:
-            await db_service.save_analysis(analysis)
-            logger.info(f"Saved final analysis to database for session: {session_id}")
-        except Exception as save_error:
-            logger.error(f"Failed to save final analysis to database: {save_error}")
+            body = await request.json()
+            reason = body.get("reason", "user_ended")
+        except:
+            # If no JSON body or parsing fails, use default
+            pass
         
-        # Update session status in database
-        try:
-            session_duration = analysis.get("session_duration_minutes", 0)
-            await db_service.end_session(session_id, session_duration)
-            logger.info(f"Updated session status in database for session: {session_id}")
-        except Exception as update_error:
-            logger.error(f"Failed to update session status: {update_error}")
+        # End the session and generate analysis using async function
+        analysis_result = await end_pitch_session_async(session_id, reason)
+        
+        if "error" in analysis_result:
+            raise HTTPException(status_code=404, detail=analysis_result["error"])
+        
+        # The analysis_result IS the analysis (not wrapped in another dict)
+        analysis = analysis_result
+        if not analysis or "error" in analysis:
+            raise HTTPException(status_code=404, detail="No analysis generated")
+        
+        # Database operations are already handled by end_pitch_session_async
+        logger.info(f"Session {session_id} ended successfully via API")
         
         return {
             "success": True,

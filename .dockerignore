@@ -69,6 +69,7 @@ cloudbuild.yaml
 README.md
 LICENSE
 CONTRIBUTING.md
+*.md
 
 # Git
 .git/

@@ -23,6 +23,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Local imports
 from .intelligent_ai_agent_improved import INVESTOR_PERSONAS, PitchStage, PITCH_STAGES
+from .database_service import DatabaseService
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class PitchWorkflowState(TypedDict):
 class PitchWorkflowAgent:
     """LangGraph-based pitch practice workflow"""
     
-    def __init__(self):
+    def __init__(self, db_service: DatabaseService = None):
         """
         Initialize a new PitchWorkflowAgent instance
         
@@ -76,6 +77,74 @@ class PitchWorkflowAgent:
         self.memory_saver = MemorySaver()
         self.workflow = self._create_workflow()
         self.memory = {}  # Initialize memory as an empty dictionary
+        self.db_service = db_service  # Database service for persistence
+        
+    async def _log_to_database(self, session_id: str, message_type: str, content: str, persona: str = None):
+        """Log conversation message to database"""
+        if self.db_service:
+            try:
+                await self.db_service.log_conversation({
+                    "session_id": session_id,
+                    "message_type": message_type,
+                    "content": content,
+                    "persona": persona
+                })
+            except Exception as e:
+                logger.error(f"Failed to log conversation to database: {e}")
+    
+    async def _save_session_to_database(self, session_id: str, persona: str, founder_name: str = None, company_name: str = None):
+        """Save or update session in database"""
+        if self.db_service:
+            try:
+                session_data = {
+                    "session_id": session_id,
+                    "persona_used": persona,
+                    "status": "active"
+                }
+                if founder_name:
+                    session_data["founder_name"] = founder_name
+                if company_name:
+                    session_data["company_name"] = company_name
+                
+                logger.debug(f"Preparing to save session data: {session_data}")
+                    
+                # Try to update first, create if doesn't exist
+                existing = await self.db_service.get_session(session_id)
+                if existing:
+                    logger.info(f"Updating existing session {session_id}")
+                    await self.db_service.update_session(session_id, session_data)
+                else:
+                    logger.info(f"Creating new session {session_id}")
+                    await self.db_service.create_session(session_data)
+                    
+                logger.info(f"Session {session_id} saved to database successfully")
+            except Exception as e:
+                logger.error(f"Failed to save session to database: {e}", exc_info=True)
+    
+    async def _save_analytics_to_database(self, session_id: str, analytics: dict):
+        """Save quick analytics to database"""
+        if self.db_service:
+            try:
+                # Convert key_insights from dict to list format
+                key_insights = analytics.get("key_insights", {})
+                if isinstance(key_insights, dict):
+                    # Flatten the insights dict into a list
+                    insights_list = []
+                    for stage, insights in key_insights.items():
+                        if insights:
+                            insights_list.extend([f"{stage}: {insight}" for insight in insights])
+                    key_insights = insights_list
+                
+                await self.db_service.save_quick_analytics({
+                    "session_id": session_id,
+                    "overall_score": analytics.get("overall_score", 0),
+                    "key_insights": key_insights,
+                    "completion_percentage": analytics.get("completion_percentage", 0),
+                    "current_topics": analytics.get("current_topics", [])
+                })
+                logger.info(f"Analytics for session {session_id} saved to database")
+            except Exception as e:
+                logger.error(f"Failed to save analytics to database: {e}")
         
     def _create_workflow(self) -> StateGraph:
         """Create the LangGraph workflow"""
@@ -1315,10 +1384,10 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
 # Global workflow instance
 pitch_workflow = None
 
-def initialize_pitch_workflow():
+def initialize_pitch_workflow(db_service: DatabaseService = None):
     """Initialize the pitch workflow"""
     global pitch_workflow
-    pitch_workflow = PitchWorkflowAgent()
+    pitch_workflow = PitchWorkflowAgent(db_service)
     return pitch_workflow
 
 def get_pitch_workflow():
@@ -1331,7 +1400,80 @@ def get_pitch_workflow():
 def start_pitch_session(conversation_id: str, persona: str = "friendly") -> Dict[str, Any]:
     """Start a new pitch practice session"""
     workflow = get_pitch_workflow()
-    return workflow.start_session(conversation_id, persona)
+    result = workflow.start_session(conversation_id, persona)
+    
+    # Note: Database saving will be handled by the calling code since this function is not async
+    
+    return result
+
+# Async wrapper functions for proper database integration
+async def start_pitch_session_async(conversation_id: str, persona: str = "friendly") -> Dict[str, Any]:
+    """Start a new pitch practice session with database integration"""
+    workflow = get_pitch_workflow()
+    result = workflow.start_session(conversation_id, persona)
+    
+    # Save session to database
+    if workflow.db_service:
+        try:
+            logger.info(f"Attempting to save session {conversation_id} to database")
+            await workflow._save_session_to_database(conversation_id, persona)
+            logger.info(f"Session {conversation_id} saved to database successfully")
+        except Exception as e:
+            logger.error(f"Failed to save session to database: {e}", exc_info=True)
+    else:
+        logger.warning(f"No database service available for session {conversation_id}")
+    
+    return result
+
+async def process_pitch_message_async(conversation_id: str, message: str) -> Dict[str, Any]:
+    """Process a message in the pitch practice session with database integration"""
+    workflow = get_pitch_workflow()
+    result = workflow.process_message(conversation_id, message)
+    
+    # Log conversation to database
+    if workflow.db_service:
+        try:
+            logger.debug(f"Logging conversation for session {conversation_id}")
+            # Log user message
+            await workflow._log_to_database(conversation_id, "user", message)
+            # Log AI response
+            if "message" in result:
+                await workflow._log_to_database(conversation_id, "ai", result["message"])
+            logger.info(f"Conversation logged successfully for session {conversation_id}")
+        except Exception as e:
+            logger.error(f"Failed to log conversation to database: {e}", exc_info=True)
+    else:
+        logger.warning(f"No database service available for logging session {conversation_id}")
+    
+    return result
+
+async def end_pitch_session_async(conversation_id: str, reason: str = "user_ended") -> Dict[str, Any]:
+    """End pitch session and generate analysis report with database integration"""
+    workflow = get_pitch_workflow()
+    result = workflow.end_session_with_analysis(conversation_id, reason)
+    
+    # Save analysis and update session in database
+    if workflow.db_service and "error" not in result:
+        try:
+            # Save analysis - the result IS the analysis
+            if result and isinstance(result, dict) and "error" not in result:
+                logger.info(f"Attempting to save analysis for session {conversation_id}")
+                logger.debug(f"Analysis data keys: {list(result.keys())}")
+                await workflow.db_service.save_analysis(result)
+                logger.info(f"Analysis saved successfully for session {conversation_id}")
+            else:
+                logger.warning(f"Analysis not saved - result is empty or has error: {result}")
+            
+            # Update session status
+            duration = result.get("duration_minutes", 0)
+            logger.info(f"Updating session status with duration: {duration} minutes")
+            await workflow.db_service.end_session(conversation_id, duration)
+            logger.info(f"Session {conversation_id} marked as completed")
+            
+        except Exception as e:
+            logger.error(f"Failed to save analysis to database: {e}", exc_info=True)
+    
+    return result
 
 def start_pitch_session_with_message(conversation_id: str, persona: str, first_message: str) -> Dict[str, Any]:
     """Start a new pitch practice session with the user's first message"""
@@ -1341,7 +1483,28 @@ def start_pitch_session_with_message(conversation_id: str, persona: str, first_m
 def process_pitch_message(conversation_id: str, message: str) -> Dict[str, Any]:
     """Process a message in the pitch practice session"""
     workflow = get_pitch_workflow()
-    return workflow.process_message(conversation_id, message)
+    result = workflow.process_message(conversation_id, message)
+    
+    # Log conversation to database asynchronously if possible
+    if workflow.db_service:
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Log user message
+                asyncio.create_task(workflow._log_to_database(conversation_id, "user", message))
+                # Log AI response
+                if "message" in result:
+                    asyncio.create_task(workflow._log_to_database(conversation_id, "ai", result["message"]))
+            else:
+                # If not in async context, run it synchronously
+                loop.run_until_complete(workflow._log_to_database(conversation_id, "user", message))
+                if "message" in result:
+                    loop.run_until_complete(workflow._log_to_database(conversation_id, "ai", result["message"]))
+        except Exception as e:
+            logger.error(f"Failed to log conversation to database: {e}")
+    
+    return result
 
 def get_pitch_analytics(conversation_id: str) -> Dict[str, Any]:
     """Get analytics for a pitch practice session"""

@@ -23,10 +23,17 @@ class DatabaseManager:
     async def connect(self):
         """Connect to MongoDB"""
         try:
-            self.client = AsyncIOMotorClient(self.connection_string)
+            self.client = AsyncIOMotorClient(
+                self.connection_string,
+                serverSelectionTimeoutMS=5000,  # 5 second timeout
+                connectTimeoutMS=5000,
+                socketTimeoutMS=5000,
+                maxPoolSize=10,
+                minPoolSize=1
+            )
             self.database = self.client[self.database_name]
             
-            # Test the connection
+            # Test the connection with timeout
             await self.client.admin.command('ping')
             logger.info(f"Successfully connected to MongoDB: {self.database_name}")
             
@@ -35,6 +42,11 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
+            # Clean up on failure
+            if self.client:
+                self.client.close()
+                self.client = None
+                self.database = None
             raise
     
     async def disconnect(self):
@@ -57,8 +69,9 @@ class DatabaseManager:
             await self.database.pitch_analyses.create_index("overall_score")
             
             # Indexes for conversation_logs collection
-            await self.database.conversation_logs.create_index("session_id")
-            await self.database.conversation_logs.create_index("timestamp")
+            await self.database.conversation_logs.create_index("session_id", unique=True)
+            await self.database.conversation_logs.create_index("created_at")
+            await self.database.conversation_logs.create_index("updated_at")
             
             logger.info("Database indexes created successfully")
             
@@ -68,6 +81,17 @@ class DatabaseManager:
     def get_database(self):
         """Get database instance"""
         return self.database
+    
+    async def health_check(self) -> bool:
+        """Check if database connection is healthy"""
+        try:
+            if not self.client or not self.database:
+                return False
+            await self.client.admin.command('ping')
+            return True
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+            return False
     
     async def close(self):
         """Close database connection"""
