@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize LLM
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model=os.getenv("GEMINI_MODEL","gemini-2.5-flash-lite-preview-06-17"),
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.7,
     convert_system_message_to_human=True
@@ -304,67 +304,114 @@ class PitchWorkflowAgent:
             
             prompt = f"""You are {persona_info['name']}, {persona_info['title']}.
 
-PERSONALITY: {persona_info['personality']}
-QUESTIONING STYLE: {persona_info['questioning_style']}
+INVESTOR PROFILE & CONTEXT:
+- Background: {persona_info['personality']}
+- Questioning Methodology: {persona_info['questioning_style']}
+- Communication Style: {persona_info.get('communication_patterns', 'Professional and engaging')}
+- Decision Framework: {persona_info.get('cognitive_approach', 'Systematic evaluation approach')}
 
-SITUATION: This is the beginning of a pitch meeting. The founder just said: "{user_intro}"
+CURRENT SITUATION ANALYSIS:
+Meeting Context: Initial pitch meeting - greeting and rapport building phase
+Founder's Opening: "{user_intro}"
+Your Objective: Establish professional rapport while efficiently gathering foundational information
 
-INSTRUCTIONS:
-1. Respond naturally and conversationally to what they just said
-2. Acknowledge any information they've already provided (name, company, etc.)
-3. If they mentioned their name, greet them by name
-4. If they mentioned their company, acknowledge it and show interest
-5. Ask ONLY ONE focused question - don't ask multiple questions at once
-6. Keep it friendly but maintain your {persona_info['personality']} personality
-7. Make it feel like a real conversation, not an interrogation
-8. CRITICAL: Ask only ONE question, not 2-3-4 questions in the same response
+GREETING STAGE STRATEGIC FRAMEWORK:
+Primary Goals:
+1. Create positive first impression aligned with your personality
+2. Gather essential identifiers (name, company, basic context)
+3. Set conversational tone for the entire pitch session
+4. Begin initial founder assessment (confidence, communication style)
 
-STAGE FOCUS: This is the GREETING stage. Focus ONLY on: name, company name, and brief introduction.
-Do NOT ask about revenue, metrics, traction, or detailed business questions yet - those come in later stages.
+Information Gathering Priorities:
+- Founder's name (if not provided)
+- Company name and basic description
+- Context for the meeting/pitch
+- Initial rapport establishment
 
-EXAMPLES OF GOOD RESPONSES (ONE QUESTION EACH):
-- If they said "Hi, I'm Alex from Facebook": "Hello Alex! Great to meet you. So you're from Facebook - are you working on something new there, or is this a separate venture?"
-- If they said "Hello, I'm Sarah and I run TechCorp": "Hi Sarah! Nice to meet you. TechCorp sounds interesting - can you give me a brief overview of what TechCorp does?"
-- If they just said "Hello": "Hello! Great to meet you. Could you start by telling me your name and what company you're presenting?"
-- If they gave name and company: Ask for a brief introduction/overview of what the company does
+CONVERSATIONAL INTELLIGENCE PROTOCOL:
+1. ACKNOWLEDGMENT: Recognize and respond to information already provided
+2. PERSONALIZATION: Use their name if provided, reference their company if mentioned
+3. NATURAL FLOW: Make the interaction feel conversational, not interrogative
+4. PERSONALITY CONSISTENCY: Every response must reflect your established character
+5. SINGLE FOCUS: One clear objective per question
 
-IMPORTANT: Your response should contain EXACTLY ONE question mark (?). Do not ask multiple questions.
+RESPONSE CONSTRAINTS:
+- EXACTLY ONE question mark (?) per response
+- Maximum 20 words for natural conversation flow
+- No compound or multi-part questions
+- Maintain your personality's characteristic tone
 
-Generate a natural, conversational response with ONLY ONE question:"""
+STAGE BOUNDARIES:
+✓ Appropriate for Greeting Stage: Names, company identity, brief overview, meeting context
+✗ Premature for Greeting Stage: Revenue, metrics, detailed business model, competition, funding
+
+RESPONSE GENERATION INSTRUCTIONS:
+1. Analyze what information the founder has already provided
+2. Identify the most important missing piece for rapport and context
+3. Craft a response that acknowledges their input while gathering needed information
+4. Ensure the question reflects your personality's natural communication style
+5. Maintain professional warmth appropriate to your character
+
+Generate your response as {persona_info['name']}, balancing efficiency with authentic personality expression:"""
         else:
-            # Standard prompt for other stages or follow-up questions
+            # Enhanced prompt for systematic stage-based questioning
             prompt = f"""You are {persona_info['name']}, {persona_info['title']}.
 
-PERSONALITY: {persona_info['personality']}
-QUESTIONING STYLE: {persona_info['questioning_style']}
+INVESTOR IDENTITY & METHODOLOGY:
+- Core Personality: {persona_info['personality']}
+- Questioning Framework: {persona_info['questioning_style']}
+- Analytical Approach: {persona_info.get('cognitive_approach', 'Systematic evaluation methodology')}
+- Communication Patterns: {persona_info.get('communication_patterns', 'Professional and direct')}
 
-CURRENT STAGE: {stage.replace('_', ' ').title()}
-STAGE OBJECTIVE: {stage_objectives.get(stage, 'Gather relevant information')}
+CURRENT EVALUATION STAGE: {stage.replace('_', ' ').title()}
+Stage Objective: {stage_objectives.get(stage, 'Gather relevant information')}
+Question Sequence: #{questions_asked_count + 1} for this stage
 
-CONVERSATION CONTEXT:
+CONVERSATION ANALYSIS:
 {conversation_context}
 
-INSTRUCTIONS:
-1. Ask ONLY ONE focused question - never ask multiple questions at once
-2. This is question #{questions_asked_count + 1} for this stage
-3. Focus ONLY on the current stage objective - don't jump ahead to future stages
-4. Build on previous responses but don't repeat questions
-5. Keep your personality and questioning style consistent
-6. If the founder seems to have answered incompletely, ask for clarification
-7. If you have enough information on this topic, prepare to transition
-8. CRITICAL: Your response should contain EXACTLY ONE question mark (?). Do not ask multiple questions.
-
-STAGE FOCUS REMINDER:
-- If this is GREETING: Focus on name, company, brief intro only
-- If this is PROBLEM_SOLUTION: Focus on the problem they solve and their approach
-- If this is TRACTION: Then you can ask about metrics, revenue, growth
-- Don't mix stage objectives - stay focused on the current stage
-
-FOUNDER INFO:
+FOUNDER PROFILE:
 - Name: {state.get('founder_name', 'Not provided')}
 - Company: {state.get('company_name', 'Not provided')}
+- Stage Progress: Currently evaluating {stage.replace('_', ' ')} aspects
 
-Generate ONE specific question about {stage.replace('_', ' ')} that matches your personality (only one question mark allowed):"""
+STAGE-SPECIFIC EVALUATION FRAMEWORK:
+{stage.replace('_', ' ').title()} Assessment Criteria:
+- Information completeness and specificity
+- Evidence quality and validation
+- Strategic thinking demonstration
+- Execution capability indicators
+
+QUESTIONING STRATEGY PROTOCOL:
+1. RESPONSE ANALYSIS: Evaluate founder's previous answer for completeness and depth
+2. GAP IDENTIFICATION: Identify the most critical missing information for this stage
+3. QUESTION FORMULATION: Create a question that reflects your personality's analytical approach
+4. DEPTH PROGRESSION: Each question should build deeper understanding within the stage
+5. PERSONALITY CONSISTENCY: Maintain your characteristic decision triggers and concerns
+
+RESPONSE QUALITY INDICATORS:
+✓ Specific examples and concrete data
+✓ Clear reasoning and strategic thinking
+✓ Honest acknowledgment of challenges
+✓ Evidence-based claims and validation
+
+⚠ Red Flags Requiring Follow-up:
+- Vague or generic responses
+- Unsupported claims or assumptions
+- Evasive answers to direct questions
+- Lack of specific examples or metrics
+
+STAGE BOUNDARY ENFORCEMENT:
+Current Focus: {stage.replace('_', ' ')} ONLY
+Do NOT ask about: {', '.join([s.replace('_', ' ') for s in stage_objectives.keys() if s != stage])}
+
+RESPONSE CONSTRAINTS:
+- EXACTLY ONE question mark (?) per response
+- Maximum 25 words for clarity and focus
+- No compound or multi-part questions
+- Align with your personality's decision-making criteria
+
+Generate your next question as {persona_info['name']}, applying your characteristic analytical rigor to {stage.replace('_', ' ')} evaluation:"""
         
         return prompt
     
@@ -426,23 +473,61 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             except Exception as e:
                 logger.error(f"Error extracting founder info: {e}")
         
-        # Evaluate response completeness
+        # Enhanced response evaluation with detailed analysis framework
         evaluation_prompt = f"""
-        Evaluate this founder's response to the investor question:
+        RESPONSE EVALUATION FRAMEWORK
         
-        Question: {state['current_question']}
-        Response: {founder_response}
+        CONTEXT ANALYSIS:
+        Investor Question: {state['current_question']}
+        Founder's Response: {founder_response}
+        Current Stage: {current_stage.replace('_', ' ').title()}
         
-        1. Is the response complete and informative? (yes/no)
-        2. What key insights can be extracted? (list 2-3 bullet points)
-        3. Does this response warrant a follow-up question in the same topic? (yes/no)
+        EVALUATION DIMENSIONS:
         
-        Format your response as:
-        COMPLETE: yes/no
-        INSIGHTS: 
-        - insight 1
-        - insight 2
-        FOLLOW_UP_NEEDED: yes/no
+        1. COMPLETENESS ASSESSMENT:
+        - Does the response directly address the question asked?
+        - Are there specific examples, data points, or evidence provided?
+        - Is the level of detail appropriate for an investor conversation?
+        - Are there obvious gaps or evasive elements in the answer?
+        
+        2. QUALITY INDICATORS:
+        ✓ Specific metrics, numbers, or concrete examples
+        ✓ Clear reasoning and logical flow
+        ✓ Honest acknowledgment of challenges or limitations
+        ✓ Evidence of strategic thinking and market understanding
+        ✓ Appropriate depth for the current stage
+        
+        3. RED FLAGS:
+        ⚠ Vague or generic statements without specifics
+        ⚠ Unsupported claims or unrealistic projections
+        ⚠ Evasive answers that don't address the core question
+        ⚠ Lack of evidence or validation for claims made
+        ⚠ Overly technical jargon without clear business impact
+        
+        4. INSIGHT EXTRACTION:
+        - What specific business insights can be derived from this response?
+        - What does this reveal about the founder's understanding of their business?
+        - What strengths or weaknesses are demonstrated?
+        - What additional information would be most valuable to gather?
+        
+        5. FOLLOW-UP STRATEGY:
+        - Is clarification needed on any specific points?
+        - Are there logical follow-up questions within this stage?
+        - Has sufficient information been gathered for this topic area?
+        
+        EVALUATION OUTPUT FORMAT:
+        COMPLETE: [yes/no with brief justification]
+        QUALITY_SCORE: [1-10 scale with reasoning]
+        INSIGHTS:
+        - [Specific business insight 1]
+        - [Specific business insight 2]
+        - [Specific business insight 3]
+        STRENGTHS_DEMONSTRATED:
+        - [Specific strength shown in response]
+        GAPS_IDENTIFIED:
+        - [Specific gap or weakness revealed]
+        FOLLOW_UP_NEEDED: [yes/no with reasoning]
+        RECOMMENDED_FOCUS: [What aspect needs deeper exploration]
         """
         
         try:
@@ -485,18 +570,91 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
     def _extract_founder_info(self, state: PitchWorkflowState, response: str) -> None:
         """Extract founder name and company from greeting stage"""
         
-        # Extract name
-        name_prompt = f"Extract the founder's name from this introduction: '{response}'. Return only the name or 'Not provided'."
+        # Enhanced name extraction with pattern recognition
+        name_prompt = f"""
+        FOUNDER NAME EXTRACTION TASK
+        
+        Input Text: "{response}"
+        
+        EXTRACTION METHODOLOGY:
+        Analyze the text for name indicators using these patterns:
+        
+        1. DIRECT INTRODUCTIONS:
+        - "I'm [Name]" / "I am [Name]"
+        - "My name is [Name]"
+        - "This is [Name]"
+        - "[Name] here" / "It's [Name]"
+        
+        2. CONTEXTUAL PATTERNS:
+        - "Hi, [Name] from [Company]"
+        - "[Name], founder of [Company]"
+        - "I'm [Name], and I..."
+        
+        3. VALIDATION CRITERIA:
+        - Must be a proper noun (capitalized)
+        - Typically 1-3 words
+        - Not a company name or title
+        - Sounds like a human name
+        
+        EXTRACTION RULES:
+        - Return ONLY the person's name, no titles or descriptions
+        - If multiple names mentioned, return the one being introduced
+        - If unclear or no name present, return "Not provided"
+        - Remove any titles (Mr., Dr., CEO, etc.)
+        
+        OUTPUT: [Extracted name or "Not provided"]
+        """
+        
         try:
             name_response = llm.invoke(name_prompt)
             name = name_response.content.strip()
-            if name and name != "Not provided" and len(name) < 50:
+            if name and name != "Not provided" and len(name) < 50 and not any(word in name.lower() for word in ['company', 'corp', 'inc', 'llc', 'ltd']):
                 state["founder_name"] = name
         except Exception as e:
             logger.warning(f"Error extracting name: {e}")
         
-        # Extract company
-        company_prompt = f"Extract the company name from this introduction: '{response}'. Return only the company name or 'Not provided'."
+        # Enhanced company extraction with business entity recognition
+        company_prompt = f"""
+        COMPANY NAME EXTRACTION TASK
+        
+        Input Text: "{response}"
+        
+        EXTRACTION METHODOLOGY:
+        Identify company/business names using these indicators:
+        
+        1. EXPLICIT COMPANY MENTIONS:
+        - "I work at [Company]"
+        - "I'm from [Company]"
+        - "My company [Company]"
+        - "[Company] is our startup"
+        - "We're building [Company]"
+        
+        2. BUSINESS ENTITY PATTERNS:
+        - Names ending with Inc, Corp, LLC, Ltd, Co
+        - Technology company patterns (ending with -ly, -ify, -tech)
+        - Startup naming conventions
+        
+        3. CONTEXTUAL INDICATORS:
+        - "founder of [Company]"
+        - "CEO of [Company]"
+        - "we started [Company]"
+        - "our platform [Company]"
+        
+        4. VALIDATION CRITERIA:
+        - Proper noun (capitalized)
+        - Business-sounding name
+        - Not a person's name
+        - Not a generic term
+        
+        EXTRACTION RULES:
+        - Return ONLY the company name, no descriptions
+        - Remove articles (the, a, an) if present
+        - Include entity suffixes if present (Inc, LLC, etc.)
+        - If unclear or no company mentioned, return "Not provided"
+        
+        OUTPUT: [Extracted company name or "Not provided"]
+        """
+        
         try:
             company_response = llm.invoke(company_prompt)
             company = company_response.content.strip()
@@ -616,22 +774,50 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
     def _finalize_session(self, state: PitchWorkflowState) -> PitchWorkflowState:
         """Finalize the pitch practice session"""
         
-        # Generate final summary
+        # Generate comprehensive session summary
         summary_prompt = f"""
-        Generate a brief, encouraging summary of this pitch practice session:
+        PITCH PRACTICE SESSION SUMMARY GENERATION
         
+        SESSION DETAILS:
         Founder: {state.get('founder_name', 'The founder')}
         Company: {state.get('company_name', 'Their company')}
-        Stages completed: {list(state['key_insights'].keys())}
+        Stages Completed: {list(state['key_insights'].keys())}
+        Total Duration: {(datetime.now().timestamp() - datetime.fromisoformat(state['session_start']).timestamp()) / 60:.1f} minutes
         
-        Key insights gathered:
+        INSIGHTS GATHERED:
         {json.dumps(state['key_insights'], indent=2)}
         
-        Provide a warm, supportive summary that:
-        1. Acknowledges their participation
-        2. Highlights 2-3 key strengths
-        3. Offers encouragement for their pitch
-        4. Keeps it concise (3-4 sentences)
+        SUMMARY GENERATION FRAMEWORK:
+        
+        1. ACKNOWLEDGMENT & APPRECIATION:
+        - Recognize their time investment and engagement
+        - Acknowledge the effort put into the practice session
+        - Express appreciation for their openness and responses
+        
+        2. STRENGTH IDENTIFICATION:
+        - Identify 2-3 specific strengths demonstrated during the session
+        - Focus on concrete examples from their responses
+        - Highlight areas where they showed particular clarity or passion
+        
+        3. ENCOURAGEMENT & MOTIVATION:
+        - Provide genuine, specific encouragement based on their performance
+        - Connect their strengths to investor appeal
+        - Reinforce confidence in their business potential
+        
+        4. FORWARD-LOOKING PERSPECTIVE:
+        - Suggest next steps or areas for continued development
+        - Frame the practice as preparation for real investor meetings
+        - Maintain optimistic tone about their pitch readiness
+        
+        TONE REQUIREMENTS:
+        - Warm and supportive, but professional
+        - Specific rather than generic
+        - Encouraging without being unrealistic
+        - Personalized to their actual responses and company
+        
+        LENGTH: 4-6 sentences that feel substantial but not overwhelming
+        
+        Generate a personalized, encouraging summary that reflects their specific journey through this practice session:
         """
         
         try:
@@ -858,32 +1044,74 @@ Generate ONE specific question about {stage.replace('_', ' ')} that matches your
             # Calculate communication metrics
             comm_metrics = self._calculate_communication_metrics(state['messages'])
             
-            # Generate comprehensive analysis using AI
+            # Generate comprehensive pitch analysis using advanced evaluation framework
             analysis_prompt = f"""
-            Analyze this pitch practice session and provide a comprehensive evaluation report.
+            COMPREHENSIVE PITCH ANALYSIS FRAMEWORK
             
-            SESSION DATA:
-            - Founder: {state.get('founder_name', 'Unknown')}
-            - Company: {state.get('company_name', 'Unknown')}
-            - Duration: {analytics['duration_minutes']} minutes
-            - Stages Completed: {len(analytics['completed_stages'])}/9
-            - Current Stage: {analytics['current_stage']}
-            - Total Questions Asked: {analytics['total_questions']}
-            - Session Complete: {analytics['workflow_complete']}
+            You are an expert pitch evaluation consultant with 15+ years of experience analyzing startup presentations for top-tier venture capital firms. Your analysis will be used by founders to improve their pitch effectiveness and by investors to make informed decisions.
             
-            COMMUNICATION METRICS:
-            - Engagement: Talked {comm_metrics['engagement']['talked_count']} times ({comm_metrics['engagement']['talk_percentage']}%), Listened {comm_metrics['engagement']['listened_count']} times ({comm_metrics['engagement']['listen_percentage']}%)
-            - Fluency: {comm_metrics['fluency']['filler_count']} fillers, {comm_metrics['fluency']['grammar_issues']} grammar issues, {comm_metrics['fluency']['vocabulary_richness']} vocabulary richness
-            - Interactivity: {comm_metrics['interactivity']['conversation_turns']} turns, {comm_metrics['interactivity']['turn_frequency']} turn frequency
-            - Questions: {comm_metrics['questions_asked']['founder_questions']} questions asked, {comm_metrics['questions_asked']['questions_per_minute']} per minute
+            SESSION OVERVIEW:
+            Founder: {state.get('founder_name', 'Unknown')}
+            Company: {state.get('company_name', 'Unknown')}
+            Session Duration: {analytics['duration_minutes']} minutes
+            Completion Status: {len(analytics['completed_stages'])}/9 stages completed
+            Current Stage: {analytics['current_stage']}
+            Total Investor Questions: {analytics['total_questions']}
+            Session Complete: {analytics['workflow_complete']}
             
-            STAGE INSIGHTS:
+            COMMUNICATION PERFORMANCE METRICS:
+            Engagement Balance:
+            - Founder Speaking: {comm_metrics['engagement']['talked_count']} instances ({comm_metrics['engagement']['talk_percentage']}%)
+            - Investor Listening: {comm_metrics['engagement']['listened_count']} instances ({comm_metrics['engagement']['listen_percentage']}%)
+            - Optimal Range: 70-80% founder speaking, 20-30% listening/responding
+            
+            Fluency Assessment:
+            - Filler Words: {comm_metrics['fluency']['filler_count']} instances (um, uh, like, you know)
+            - Grammar Issues: {comm_metrics['fluency']['grammar_issues']} detected
+            - Vocabulary Sophistication: {comm_metrics['fluency']['vocabulary_richness']} score
+            
+            Conversational Dynamics:
+            - Total Conversation Turns: {comm_metrics['interactivity']['conversation_turns']}
+            - Turn Frequency: {comm_metrics['interactivity']['turn_frequency']} exchanges per minute
+            - Founder Questions Asked: {comm_metrics['questions_asked']['founder_questions']}
+            - Question Rate: {comm_metrics['questions_asked']['questions_per_minute']} questions per minute
+            
+            STAGE-BY-STAGE INSIGHTS ANALYSIS:
             {json.dumps(analytics['key_insights'], indent=2)}
             
-            CONVERSATION MESSAGES:
+            COMPLETE CONVERSATION TRANSCRIPT:
             {self._format_conversation_for_analysis(state['messages'])}
             
-            Please provide a detailed analysis in the following JSON format:
+            EVALUATION METHODOLOGY:
+            Apply the following analytical framework to generate a comprehensive assessment:
+            
+            1. CONTENT ANALYSIS (70% of overall score):
+            - Evaluate each of the 10 core pitch categories
+            - Assess strategic thinking and business acumen
+            - Analyze market understanding and competitive positioning
+            - Review financial projections and business model viability
+            
+            2. COMMUNICATION ANALYSIS (30% of overall score):
+            - Engagement balance and conversational flow
+            - Speaking fluency and confidence indicators
+            - Interactive responsiveness and adaptability
+            - Question-asking behavior and investor engagement
+            
+            3. INVESTOR READINESS ASSESSMENT:
+            - Overall pitch maturity and sophistication
+            - Ability to handle challenging questions
+            - Demonstration of coachability and learning
+            - Market timing and opportunity assessment
+            
+            SCORING METHODOLOGY:
+            Use a rigorous 100-point scale with the following calibration:
+            - 90-100 (Vertx Assured): Exceptional, investor-ready quality that would impress top-tier VCs
+            - 75-89 (Good): Strong performance with minor improvements needed for investor meetings
+            - 60-74 (Satisfactory): Meets basic requirements but needs enhancement for serious consideration
+            - 40-59 (Below Average): Some elements present but requires significant improvement
+            - 0-39 (Need to Improve): Major gaps requiring fundamental work before investor presentations
+            
+            Generate your analysis in the following detailed JSON format:
             {{
                 "overall_score": <score out of 100>,
                 "overall_rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
