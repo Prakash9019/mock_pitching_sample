@@ -56,6 +56,7 @@ class PitchWorkflowState(TypedDict):
     workflow_complete: bool
     current_question: str
     question_answered: bool
+    follow_up_count: int  # Track how many follow-up questions we've asked
     
     # Analytics
     session_start: str
@@ -205,6 +206,7 @@ class PitchWorkflowAgent:
         state["questions_asked"] = []
         state["key_insights"] = {stage: [] for stage in PITCH_STAGES}
         state["question_answered"] = False
+        state["follow_up_count"] = 0
         
         # Set persona if not provided
         if "persona" not in state:
@@ -260,6 +262,7 @@ class PitchWorkflowAgent:
             state["stage_progress"][current_stage]["questions_asked"] += 1
             state["questions_asked"].append(question)
             state["question_answered"] = False
+            state["follow_up_count"] = 0  # Reset follow-up count for new question
             
             # Add to messages
             state["messages"].append(AIMessage(content=question))
@@ -270,6 +273,7 @@ class PitchWorkflowAgent:
             logger.error(f"Error generating question: {e}")
             fallback_question = f"Could you tell me more about {current_stage.replace('_', ' ')}?"
             state["current_question"] = fallback_question
+            state["follow_up_count"] = 0  # Reset follow-up count for new question
             state["messages"].append(AIMessage(content=fallback_question))
         
         return state
@@ -415,6 +419,141 @@ Generate your next question as {persona_info['name']}, applying your characteris
         
         return prompt
     
+    def _validate_answer_relevance(self, question: str, response: str, stage: str) -> Dict[str, Any]:
+        """Validate if the user's response actually answers the question asked"""
+        
+        validation_prompt = f"""
+        CONVERSATION RESPONSE ANALYSIS TASK
+        
+        You are an expert conversation analyst. Analyze the user's response to determine its type and appropriate handling.
+        
+        CONTEXT:
+        Current Stage: {stage.replace('_', ' ').title()}
+        Question Asked: "{question}"
+        User's Response: "{response}"
+        
+        ANALYSIS CATEGORIES:
+        
+        1. REPEAT REQUEST DETECTION:
+        Is the user asking to repeat/clarify the question? Look for:
+        - Direct requests: "repeat", "again", "what was the question"
+        - Confusion indicators: "what?", "huh?", "pardon?", "sorry?"
+        - Clarification requests: "didn't catch that", "didn't hear", "come again"
+        - Any indication they want the question restated
+        
+        2. ANSWER RELEVANCE (if not a repeat request):
+        - Does the response directly address what was asked?
+        - Is the user attempting to answer the specific question?
+        - Or are they avoiding, deflecting, or changing the subject?
+        
+        3. COMPLETENESS CHECK (if answering):
+        - If the question asks for specific information, is it provided?
+        - If it's open-ended, does the response show genuine engagement?
+        
+        EXAMPLES:
+        
+        REPEAT REQUESTS:
+        Q: "What's your name?" → A: "Can you repeat that?" (REPEAT REQUEST)
+        Q: "Tell me about your business" → A: "What?" (REPEAT REQUEST)
+        Q: "What's your company?" → A: "Sorry, didn't catch that" (REPEAT REQUEST)
+        Q: "How do you make money?" → A: "Huh?" (REPEAT REQUEST)
+        Q: "What problem do you solve?" → A: "Come again?" (REPEAT REQUEST)
+        
+        VALID ANSWERS:
+        Q: "What's your name?" → A: "My name is John" (VALID ANSWER)
+        Q: "What's your company?" → A: "TechCorp" (VALID ANSWER)
+        
+        INVALID ANSWERS:
+        Q: "What's your name?" → A: "Guess my name!" (EVASIVE)
+        Q: "What's your company?" → A: "That's secret!" (EVASIVE)
+        
+        OUTPUT FORMAT:
+        REPEAT_REQUESTED: [true/false]
+        VALID: [true/false - only relevant if not a repeat request]
+        REASON: [Brief explanation]
+        MISSING_INFO: [What specific information is missing if invalid]
+        FOLLOW_UP_NEEDED: [true/false - whether we need to ask again]
+        """
+        
+        try:
+            validation_response = llm.invoke(validation_prompt)
+            validation_text = validation_response.content
+            
+            # Parse validation result
+            repeat_requested = "true" in validation_text.split("REPEAT_REQUESTED:")[1].split("\n")[0].lower() if "REPEAT_REQUESTED:" in validation_text else False
+            is_valid = "true" in validation_text.split("VALID:")[1].split("\n")[0].lower() if "VALID:" in validation_text else False
+            
+            reason = ""
+            if "REASON:" in validation_text:
+                reason = validation_text.split("REASON:")[1].split("\n")[0].strip()
+            
+            missing_info = ""
+            if "MISSING_INFO:" in validation_text:
+                missing_info = validation_text.split("MISSING_INFO:")[1].split("\n")[0].strip()
+            
+            follow_up_needed = "true" in validation_text.split("FOLLOW_UP_NEEDED:")[1].split("\n")[0].lower() if "FOLLOW_UP_NEEDED:" in validation_text else not is_valid
+            
+            return {
+                "is_valid": is_valid,
+                "reason": reason,
+                "missing_info": missing_info,
+                "follow_up_needed": follow_up_needed,
+                "repeat_requested": repeat_requested
+            }
+            
+        except Exception as e:
+            logger.error(f"Error validating answer relevance: {e}")
+            # Default to valid to avoid getting stuck
+            return {
+                "is_valid": True,
+                "reason": "Validation error - defaulting to valid",
+                "missing_info": "",
+                "follow_up_needed": False,
+                "repeat_requested": False
+            }
+
+    def _generate_follow_up_question(self, original_question: str, response: str, validation_result: Dict, stage: str, persona_info: Dict) -> str:
+        """Generate a follow-up question when the user didn't properly answer"""
+        
+        follow_up_prompt = f"""
+        FOLLOW-UP QUESTION GENERATION - KEEP IT SHORT FOR TTS
+        
+        You are {persona_info['name']}, {persona_info['title']}.
+        
+        SITUATION:
+        - You asked: "{original_question}"
+        - User responded: "{response}"
+        - Issue: {validation_result['reason']}
+        
+        CRITICAL REQUIREMENTS:
+        - Maximum 1-2 sentences only
+        - Keep it under 25 words if possible
+        - Perfect for text-to-speech conversion
+        - Sound natural when spoken aloud
+        
+        TASK:
+        Generate a SHORT, polite follow-up that redirects to the original question.
+        
+        GOOD EXAMPLES (SHORT):
+        "I appreciate the humor, but what's your name?"
+        "That's interesting, but what's your company called?"
+        "I understand, but could you tell me your business model?"
+        "Thanks for that, but I still need to know your name."
+        
+        BAD EXAMPLES (TOO LONG):
+        "I appreciate the humor and playfulness, it shows creativity, but I really need to know your name so I can address you properly and understand your venture better."
+        
+        Generate a SHORT follow-up question (max 25 words):
+        """
+        
+        try:
+            follow_up_response = llm.invoke(follow_up_prompt)
+            return follow_up_response.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating follow-up question: {e}")
+            # Fallback follow-up
+            return f"I'd like to get back to my question - {original_question}"
+
     def _evaluate_founder_response(self, state: PitchWorkflowState) -> PitchWorkflowState:
         """Evaluate the founder's response and extract key insights"""
         
@@ -437,6 +576,47 @@ Generate your next question as {persona_info['name']}, applying your characteris
             state["workflow_complete"] = False
             return state
         
+        current_stage = state["current_stage"]
+        original_question = state["current_question"]
+        
+        # First, validate if the response actually answers the question
+        validation_result = self._validate_answer_relevance(original_question, founder_response, current_stage)
+        
+        # If the answer is not valid, generate a follow-up question (with limits)
+        if not validation_result["is_valid"] and validation_result["follow_up_needed"]:
+            logger.info(f"Invalid response detected: {validation_result['reason']}")
+            
+            # Check follow-up limit to prevent infinite loops
+            current_follow_ups = state.get("follow_up_count", 0)
+            max_follow_ups = 2  # Maximum 2 follow-up attempts per question
+            
+            if current_follow_ups >= max_follow_ups:
+                logger.info(f"Maximum follow-ups ({max_follow_ups}) reached, accepting response and moving on")
+                # Accept the response and continue to avoid getting stuck
+                state["question_answered"] = True
+                state["follow_up_count"] = 0  # Reset for next question
+            else:
+                # Generate follow-up question
+                persona_info = INVESTOR_PERSONAS[state["persona"]]
+                follow_up_question = self._generate_follow_up_question(
+                    original_question, founder_response, validation_result, current_stage, persona_info
+                )
+                
+                # Update state with follow-up question
+                state["current_question"] = follow_up_question
+                state["question_answered"] = False
+                state["should_transition"] = False
+                
+                # Add follow-up message to conversation
+                state["messages"].append(AIMessage(content=follow_up_question))
+                
+                # Track that we had to ask a follow-up
+                state["follow_up_count"] = current_follow_ups + 1
+                
+                logger.info(f"Generated follow-up question ({state['follow_up_count']}/{max_follow_ups}): {follow_up_question[:50]}...")
+                return state
+        
+        # If we reach here, the answer is valid - proceed with normal evaluation
         current_stage = state["current_stage"]
         
         # Special handling for greeting stage to extract founder info
@@ -853,6 +1033,7 @@ Generate your next question as {persona_info['name']}, applying your characteris
             workflow_complete=False,
             current_question="",
             question_answered=False,
+            follow_up_count=0,
             session_start="",
             stage_durations={},
             questions_asked=[],
@@ -889,6 +1070,7 @@ Generate your next question as {persona_info['name']}, applying your characteris
             workflow_complete=False,
             current_question="",
             question_answered=False,
+            follow_up_count=0,
             session_start="",
             stage_durations={},
             questions_asked=[],

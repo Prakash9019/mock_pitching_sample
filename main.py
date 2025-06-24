@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 import os
 import json
 import uuid
@@ -12,6 +12,11 @@ from typing import Optional, Union, BinaryIO
 import logging
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+
+# Configure logging first
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Socket.IO integration
 import socketio
@@ -36,6 +41,16 @@ from app.services.langgraph_workflow import (
     get_pitch_analytics
 )
 
+# Import VAD and audio streaming services
+try:
+    from app.services.voice_activity_detection import initialize_vad_system
+    from app.services.audio_websocket_handler import initialize_audio_websocket_handler
+    VAD_AVAILABLE = True
+    logger.info("VAD services imported successfully")
+except ImportError as e:
+    logger.warning(f"VAD services not available: {e}")
+    VAD_AVAILABLE = False
+
 from app.services.intelligent_ai_agent_improved import (
     start_improved_conversation,
     generate_improved_response,
@@ -49,11 +64,6 @@ from app.services.database_service import DatabaseService
 from app.models import PitchAnalysis, PitchSession
 
 # Integration example import removed - focusing on audio conversation
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 fastapi_app = FastAPI(
@@ -77,8 +87,23 @@ sio = socketio.AsyncServer(
     async_mode='asgi',
     cors_allowed_origins="*",
     logger=True,
-    engineio_logger=True
+    engineio_logger=False,  # Reduce logging noise
+    ping_timeout=60,
+    ping_interval=25,
+    max_http_buffer_size=1000000  # 1MB for audio data
 )
+
+# Initialize VAD system (if available)
+if VAD_AVAILABLE:
+    try:
+        initialize_vad_system()
+        initialize_audio_websocket_handler(sio)
+        logger.info("VAD system initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize VAD system: {e}")
+        VAD_AVAILABLE = False
+else:
+    logger.warning("VAD system not available - audio features disabled")
 
 # Create ASGI app with Socket.IO and FastAPI
 app = socketio.ASGIApp(
@@ -136,6 +161,47 @@ async def shutdown_database():
 # Mount static files
 fastapi_app.mount("/static", StaticFiles(directory=os.path.join(BASE_PATH, "static")), name="static")
 
+# Add Socket.IO client route
+@fastapi_app.get("/socket.io/socket.io.js")
+async def socket_io_js():
+    """Serve Socket.IO client library"""
+    try:
+        import socketio
+        # Get the Socket.IO client path from the package
+        import pkg_resources
+        socketio_path = pkg_resources.resource_filename('socketio', 'static/socket.io.js')
+        
+        if os.path.exists(socketio_path):
+            return FileResponse(socketio_path, media_type="application/javascript")
+        else:
+            # Fallback: serve from CDN content
+            socketio_js_content = """
+            // Socket.IO client library fallback
+            console.warn('Loading Socket.IO from embedded fallback');
+            """
+            return Response(content=socketio_js_content, media_type="application/javascript")
+    except Exception as e:
+        logger.error(f"Error serving Socket.IO client: {e}")
+        # Return a minimal Socket.IO client loader
+        fallback_content = """
+        // Socket.IO client loader
+        (function() {
+            if (typeof io === 'undefined') {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+                script.onload = function() {
+                    console.log('Socket.IO loaded from CDN');
+                    window.dispatchEvent(new Event('socketio-loaded'));
+                };
+                script.onerror = function() {
+                    console.error('Failed to load Socket.IO from CDN');
+                };
+                document.head.appendChild(script);
+            }
+        })();
+        """
+        return Response(content=fallback_content, media_type="application/javascript")
+
 def cleanup_old_audio_files(session_id: str, keep_count: int = 5):
     """Clean up old audio files for a session, keeping only the most recent ones"""
     try:
@@ -171,12 +237,38 @@ def cleanup_old_audio_files(session_id: str, keep_count: int = 5):
 
 @fastapi_app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
+    """Main page - Hybrid Voice Activity Detection with TTS"""
+    return templates.TemplateResponse("hybrid_vad_main.html", {"request": request})
+
+@fastapi_app.get("/original", response_class=HTMLResponse)
+async def original_interface(request: Request):
+    """Original interface for reference"""
     return templates.TemplateResponse("index.html", {"request": request})
 
 @fastapi_app.get("/pitch-analysis/{session_id}", response_class=HTMLResponse)
 async def pitch_analysis_page(request: Request, session_id: str):
     """Serve the pitch analysis page"""
     return templates.TemplateResponse("pitch_analysis.html", {"request": request, "session_id": session_id})
+
+@fastapi_app.get("/vad-demo", response_class=HTMLResponse)
+async def vad_demo_page(request: Request):
+    """Serve the Voice Activity Detection demo page"""
+    return templates.TemplateResponse("vad_demo.html", {"request": request})
+
+@fastapi_app.get("/socketio-test", response_class=HTMLResponse)
+async def socketio_test_page(request: Request):
+    """Serve the Socket.IO connection test page"""
+    return templates.TemplateResponse("socketio_test.html", {"request": request})
+
+@fastapi_app.get("/transcription-demo", response_class=HTMLResponse)
+async def transcription_demo_page(request: Request):
+    """Serve the transcription modes comparison demo"""
+    return templates.TemplateResponse("transcription_demo.html", {"request": request})
+
+@fastapi_app.get("/hybrid-vad", response_class=HTMLResponse)
+async def hybrid_vad_demo_page(request: Request):
+    """Serve the Hybrid Voice Activity Detection demo page"""
+    return templates.TemplateResponse("hybrid_vad_demo.html", {"request": request})
 
 
 @fastapi_app.post("/pitch")

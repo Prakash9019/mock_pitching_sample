@@ -1,0 +1,423 @@
+ya <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcription Modes Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        
+        .demo-section {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .demo-box {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .demo-box.active {
+            border-color: #4CAF50;
+            box-shadow: 0 0 20px rgba(76, 175, 80, 0.3);
+        }
+        
+        .transcription-display {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            min-height: 100px;
+            font-family: monospace;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .final-text {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .interim-text {
+            color: #FFC107;
+            font-style: italic;
+        }
+        
+        .batch-text {
+            color: #2196F3;
+            font-weight: bold;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .status.listening {
+            background: rgba(76, 175, 80, 0.3);
+            border: 1px solid #4CAF50;
+        }
+        
+        .status.processing {
+            background: rgba(255, 193, 7, 0.3);
+            border: 1px solid #FFC107;
+        }
+        
+        .status.idle {
+            background: rgba(158, 158, 158, 0.3);
+            border: 1px solid #9E9E9E;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 5px;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        button.stop {
+            background: linear-gradient(45deg, #f44336, #da190b);
+        }
+        
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .feature-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .feature-list li:before {
+            content: "✅ ";
+            margin-right: 8px;
+        }
+        
+        .feature-list.cons li:before {
+            content: "❌ ";
+        }
+        
+        h1, h2, h3 {
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .timer {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Transcription Modes Comparison</h1>
+        <p>Experience the difference between batch processing and real-time transcription!</p>
+    </div>
+
+    <div class="demo-section">
+        <!-- Current System (Batch) -->
+        <div class="demo-box" id="batch-demo">
+            <h3>📦 Current System (Batch Mode)</h3>
+            <div class="status idle" id="batch-status">Ready - Click Start to begin</div>
+            <div class="timer" id="batch-timer">0s</div>
+            <button onclick="startBatchDemo()" id="batch-start">Start Batch Demo</button>
+            <button onclick="stopBatchDemo()" id="batch-stop" disabled>Stop</button>
+            
+            <div class="transcription-display" id="batch-transcription">
+                <div style="color: #666;">Transcription will appear here after you finish speaking...</div>
+            </div>
+            
+            <h4>How it works:</h4>
+            <ul class="feature-list">
+                <li>You speak while system records</li>
+                <li>You pause for 5 seconds</li>
+                <li>System transcribes complete speech</li>
+                <li>Text appears all at once</li>
+                <li>More accurate, complete sentences</li>
+            </ul>
+        </div>
+
+        <!-- Real-Time System -->
+        <div class="demo-box" id="realtime-demo">
+            <h3>⚡ Real-Time Mode</h3>
+            <div class="status idle" id="realtime-status">Ready - Click Start to begin</div>
+            <button onclick="startRealtimeDemo()" id="realtime-start">Start Real-Time Demo</button>
+            <button onclick="stopRealtimeDemo()" id="realtime-stop" disabled>Stop</button>
+            
+            <div class="transcription-display" id="realtime-transcription">
+                <div style="color: #666;">Text will appear here as you speak...</div>
+            </div>
+            
+            <h4>How it works:</h4>
+            <ul class="feature-list">
+                <li>Text appears as you speak</li>
+                <li>Immediate visual feedback</li>
+                <li>See partial words/sentences</li>
+                <li>More interactive experience</li>
+                <li>Can self-correct in real-time</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🤔 Which Do You Prefer?</h2>
+        <div class="comparison">
+            <div>
+                <h3>📦 Batch Mode (Current)</h3>
+                <h4>Pros:</h4>
+                <ul class="feature-list">
+                    <li>More accurate transcription</li>
+                    <li>Complete sentences</li>
+                    <li>Better for conversation flow</li>
+                    <li>Lower API costs</li>
+                    <li>Less distracting</li>
+                </ul>
+                <h4>Cons:</h4>
+                <ul class="feature-list cons">
+                    <li>No immediate feedback</li>
+                    <li>Must wait to see text</li>
+                    <li>Less interactive</li>
+                </ul>
+            </div>
+            
+            <div>
+                <h3>⚡ Real-Time Mode</h3>
+                <h4>Pros:</h4>
+                <ul class="feature-list">
+                    <li>Immediate text feedback</li>
+                    <li>More engaging experience</li>
+                    <li>Can see what's being captured</li>
+                    <li>Self-correction possible</li>
+                    <li>More interactive</li>
+                </ul>
+                <h4>Cons:</h4>
+                <ul class="feature-list cons">
+                    <li>May show partial/incorrect words</li>
+                    <li>More distracting</li>
+                    <li>Higher processing costs</li>
+                    <li>More complex implementation</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <h3>🎯 Your Choice:</h3>
+            <button onclick="chooseMode('batch')" style="background: linear-gradient(45deg, #2196F3, #0b7dda);">
+                Keep Current (Batch Mode)
+            </button>
+            <button onclick="chooseMode('realtime')" style="background: linear-gradient(45deg, #ff9800, #f57c00);">
+                Switch to Real-Time
+            </button>
+            <button onclick="chooseMode('hybrid')" style="background: linear-gradient(45deg, #9c27b0, #7b1fa2);">
+                Hybrid Approach
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let batchRecognition = null;
+        let realtimeRecognition = null;
+        let batchTimer = 0;
+        let batchInterval = null;
+        
+        // Check if browser supports speech recognition
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            alert('Your browser does not support speech recognition. Please use Chrome or Edge.');
+        }
+        
+        // Batch Demo Functions
+        function startBatchDemo() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            batchRecognition = new SpeechRecognition();
+            
+            batchRecognition.continuous = true;
+            batchRecognition.interimResults = false; // Only final results
+            
+            document.getElementById('batch-status').textContent = 'Listening... (speak then pause for 5 seconds)';
+            document.getElementById('batch-status').className = 'status listening';
+            document.getElementById('batch-start').disabled = true;
+            document.getElementById('batch-stop').disabled = false;
+            document.getElementById('batch-demo').classList.add('active');
+            document.getElementById('batch-transcription').innerHTML = '<div style="color: #FFC107;">🎤 Recording... Speak now!</div>';
+            
+            // Start timer
+            batchTimer = 0;
+            batchInterval = setInterval(() => {
+                batchTimer++;
+                document.getElementById('batch-timer').textContent = batchTimer + 's';
+            }, 1000);
+            
+            batchRecognition.onresult = (event) => {
+                let finalTranscript = '';
+                for (let i = 0; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    }
+                }
+                
+                if (finalTranscript) {
+                    document.getElementById('batch-transcription').innerHTML = 
+                        `<div class="batch-text">📝 Final Transcription:</div>
+                         <div class="batch-text">"${finalTranscript}"</div>
+                         <div style="color: #4CAF50; margin-top: 10px;">✅ Complete! Ready to send to AI.</div>`;
+                    
+                    document.getElementById('batch-status').textContent = 'Transcription Complete!';
+                    document.getElementById('batch-status').className = 'status processing';
+                }
+            };
+            
+            batchRecognition.onerror = (event) => {
+                console.error('Batch recognition error:', event.error);
+                document.getElementById('batch-transcription').innerHTML = 
+                    `<div style="color: #f44336;">❌ Error: ${event.error}</div>`;
+            };
+            
+            batchRecognition.start();
+        }
+        
+        function stopBatchDemo() {
+            if (batchRecognition) {
+                batchRecognition.stop();
+            }
+            if (batchInterval) {
+                clearInterval(batchInterval);
+            }
+            
+            document.getElementById('batch-status').textContent = 'Stopped';
+            document.getElementById('batch-status').className = 'status idle';
+            document.getElementById('batch-start').disabled = false;
+            document.getElementById('batch-stop').disabled = true;
+            document.getElementById('batch-demo').classList.remove('active');
+        }
+        
+        // Real-time Demo Functions
+        function startRealtimeDemo() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            realtimeRecognition = new SpeechRecognition();
+            
+            realtimeRecognition.continuous = true;
+            realtimeRecognition.interimResults = true; // Show partial results
+            
+            document.getElementById('realtime-status').textContent = 'Listening... (speak and watch text appear)';
+            document.getElementById('realtime-status').className = 'status listening';
+            document.getElementById('realtime-start').disabled = true;
+            document.getElementById('realtime-stop').disabled = false;
+            document.getElementById('realtime-demo').classList.add('active');
+            document.getElementById('realtime-transcription').innerHTML = '<div style="color: #FFC107;">🎤 Start speaking...</div>';
+            
+            realtimeRecognition.onresult = (event) => {
+                let finalTranscript = '';
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                
+                document.getElementById('realtime-transcription').innerHTML = 
+                    `<div class="final-text">✅ Final: ${finalTranscript}</div>
+                     <div class="interim-text">⏳ Current: ${interimTranscript}</div>
+                     <div style="color: #666; font-size: 12px; margin-top: 10px;">
+                         Green text is confirmed, yellow text is being processed...
+                     </div>`;
+            };
+            
+            realtimeRecognition.onerror = (event) => {
+                console.error('Real-time recognition error:', event.error);
+                document.getElementById('realtime-transcription').innerHTML = 
+                    `<div style="color: #f44336;">❌ Error: ${event.error}</div>`;
+            };
+            
+            realtimeRecognition.start();
+        }
+        
+        function stopRealtimeDemo() {
+            if (realtimeRecognition) {
+                realtimeRecognition.stop();
+            }
+            
+            document.getElementById('realtime-status').textContent = 'Stopped';
+            document.getElementById('realtime-status').className = 'status idle';
+            document.getElementById('realtime-start').disabled = false;
+            document.getElementById('realtime-stop').disabled = true;
+            document.getElementById('realtime-demo').classList.remove('active');
+        }
+        
+        function chooseMode(mode) {
+            let message = '';
+            switch(mode) {
+                case 'batch':
+                    message = '📦 Great choice! The current batch mode provides accurate, complete transcriptions perfect for natural conversation flow.';
+                    break;
+                case 'realtime':
+                    message = '⚡ Excellent! I can implement real-time transcription so you see text appear as you speak. This will be more interactive!';
+                    break;
+                case 'hybrid':
+                    message = '🎯 Perfect! A hybrid approach showing real-time text feedback while maintaining smart conversation flow. Best of both worlds!';
+                    break;
+            }
+            
+            alert(message + '\n\nLet me know if you want me to implement this option!');
+        }
+        
+        // Auto-stop batch demo after silence (simulating the 5-second rule)
+        let silenceTimeout = null;
+        
+        function simulateBatchBehavior() {
+            // This would normally be handled by the VAD system
+            // For demo purposes, we'll show how the batch system works
+        }
+    </script>
+</body>
+</html>
