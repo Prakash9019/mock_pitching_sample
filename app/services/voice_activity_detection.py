@@ -43,9 +43,9 @@ class VoiceActivityDetector:
     def __init__(self, 
                  sample_rate: int = 16000,
                  frame_duration_ms: int = 30,
-                 silence_threshold_seconds: float = 5.0,
-                 min_speech_duration_seconds: float = 1.0,
-                 vad_aggressiveness: int = 2):
+                 silence_threshold_seconds: float = 3.0,  # Reduced to 3 seconds
+                 min_speech_duration_seconds: float = 0.5,  # Reduced to 0.5 seconds
+                 vad_aggressiveness: int = 1):  # Less aggressive for better sensitivity
         """
         Initialize VAD system
         
@@ -127,15 +127,15 @@ class VoiceActivityDetector:
             # Dynamic threshold adjustment based on recent audio levels
             if not hasattr(self, '_volume_history'):
                 self._volume_history = deque(maxlen=100)  # Keep last 100 measurements
-                self._base_threshold = 300  # Base threshold
+                self._base_threshold = 50  # Lower base threshold for better sensitivity
             
             self._volume_history.append(rms)
             
             # Calculate adaptive threshold
             if len(self._volume_history) > 10:
                 avg_volume = np.mean(list(self._volume_history))
-                # Threshold is base + 2x average background noise
-                adaptive_threshold = max(self._base_threshold, avg_volume * 2.5)
+                # Threshold is base + 1.5x average background noise (more sensitive)
+                adaptive_threshold = max(self._base_threshold, avg_volume * 1.5)
             else:
                 adaptive_threshold = self._base_threshold
             
@@ -147,9 +147,9 @@ class VoiceActivityDetector:
             else:
                 self._debug_counter = 0
             
-            # Log every 100 frames for debugging
-            if self._debug_counter % 100 == 0:
-                logger.debug(f"Volume VAD: RMS={rms:.1f}, Threshold={adaptive_threshold:.1f}, Speech={is_speech}")
+            # Log every 50 frames for debugging, and always log when speech is detected
+            if self._debug_counter % 50 == 0 or is_speech:
+                logger.info(f"Volume VAD: RMS={rms:.1f}, Threshold={adaptive_threshold:.1f}, Speech={is_speech}")
             
             return is_speech
             
@@ -170,8 +170,22 @@ class VoiceActivityDetector:
         current_time = time.time()
         
         # Add to buffer
-        audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
-        self.audio_buffer.extend(audio_data)
+        try:
+            audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
+            self.audio_buffer.extend(audio_data)
+            
+            # Debug logging for audio data
+            if hasattr(self, '_chunk_counter'):
+                self._chunk_counter += 1
+            else:
+                self._chunk_counter = 0
+            
+            if self._chunk_counter % 20 == 0:  # Log every 20 chunks
+                logger.info(f"Audio chunk: {len(audio_chunk)} bytes, {len(audio_data)} samples, max={np.max(np.abs(audio_data)) if len(audio_data) > 0 else 0}")
+                
+        except Exception as e:
+            logger.error(f"Error processing audio chunk: {e}")
+            return {"error": f"Audio processing error: {e}"}
         
         # Detect speech in this chunk
         if self.vad:

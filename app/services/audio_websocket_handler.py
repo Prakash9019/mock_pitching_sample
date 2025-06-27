@@ -108,34 +108,60 @@ class AudioWebSocketHandler:
                 session_id = data.get('session_id')
                 audio_data = data.get('audio_data')  # Base64 encoded audio
                 
+                logger.info(f"Received audio stream for session {session_id}, data length: {len(audio_data) if audio_data else 0}")
+                
                 if not session_id or session_id not in self.active_sessions:
+                    logger.warning(f"Invalid session: {session_id}")
                     await self.sio.emit('audio_error', {
                         'error': 'Invalid session'
                     }, room=sid)
                     return
                 
                 if not audio_data:
+                    logger.warning("No audio data received")
                     return
                 
                 # Decode audio data
                 import base64
+                import numpy as np
                 try:
+                    # Decode base64 audio data
                     audio_bytes = base64.b64decode(audio_data)
+                    logger.info(f"Decoded audio: {len(audio_bytes)} bytes")
+                    
+                    # Convert from Int16 to proper PCM format for VAD
+                    # The browser sends Int16 data, convert to bytes
+                    audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+                    
+                    # Convert to 16kHz if needed (browser usually sends 44.1kHz or 48kHz)
+                    # For now, assume it's already 16kHz from browser settings
+                    pcm_audio = audio_array.tobytes()
+                    
+                    logger.info(f"Converted to PCM: {len(pcm_audio)} bytes, {len(audio_array)} samples")
+                    
                 except Exception as e:
-                    logger.error(f"Error decoding audio data: {e}")
+                    logger.error(f"Error decoding/converting audio data: {e}")
                     return
                 
                 # Process audio through VAD
-                vad_result = self.audio_processor.process_audio_stream(audio_bytes)
-                
-                # Send VAD status to client
-                if vad_result.get('action'):
-                    await self.sio.emit('vad_status', {
-                        'session_id': session_id,
-                        'action': vad_result['action'],
-                        'is_speaking': vad_result['is_speaking'],
-                        'speech_duration': vad_result.get('speech_duration', 0)
-                    }, room=sid)
+                if self.audio_processor:
+                    vad_result = self.audio_processor.process_audio_stream(pcm_audio)
+                    logger.info(f"VAD result: {vad_result}")
+                    
+                    # Send VAD status to client
+                    if vad_result.get('action'):
+                        await self.sio.emit('vad_status', {
+                            'session_id': session_id,
+                            'action': vad_result['action'],
+                            'is_speaking': vad_result['is_speaking'],
+                            'speech_duration': vad_result.get('speech_duration', 0)
+                        }, room=sid)
+                        
+                        # If speech ended, process the accumulated audio
+                        if vad_result['action'] == 'speech_ended' and vad_result.get('audio_data'):
+                            await self._process_speech_segment(session_id, vad_result['audio_data'], sid)
+                else:
+                    logger.error("Audio processor not available")
                 
             except Exception as e:
                 logger.error(f"Error processing audio stream: {e}")
@@ -190,6 +216,88 @@ class AudioWebSocketHandler:
                 await self.sio.emit('audio_error', {
                     'error': f'Transcription error: {str(e)}'
                 }, room=sid)
+        
+        @self.sio.event
+        async def test_tts(sid, data):
+            """Handle test TTS request"""
+            try:
+                text = data.get('text', 'This is a test of the text-to-speech system.')
+                persona = data.get('persona', 'friendly')
+                
+                logger.info(f"Test TTS request: {text} with persona: {persona}")
+                
+                # Generate TTS audio
+                import tempfile
+                import base64
+                import os
+                from .enhanced_text_to_speech import convert_text_to_speech_with_persona
+                
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                    temp_audio_path = temp_file.name
+                
+                try:
+                    # Generate TTS audio using enhanced_text_to_speech
+                    logger.info(f"Attempting to generate TTS for: '{text}' with persona: {persona}")
+                    audio_data = convert_text_to_speech_with_persona(text, persona, temp_audio_path)
+                    
+                    if audio_data is None:
+                        logger.error("TTS generation returned None - Google Cloud TTS failed")
+                        await self.sio.emit('audio_error', {
+                            'error': 'Google Cloud TTS failed - check credentials'
+                        }, room=sid)
+                        return
+                    
+                    # Check if file was created
+                    if not os.path.exists(temp_audio_path):
+                        logger.error(f"TTS audio file not created at: {temp_audio_path}")
+                        await self.sio.emit('audio_error', {
+                            'error': 'TTS audio file not generated'
+                        }, room=sid)
+                        return
+                    
+                    # Read audio file and send to client
+                    with open(temp_audio_path, 'rb') as audio_file:
+                        audio_file_data = audio_file.read()
+                    
+                    if len(audio_file_data) == 0:
+                        logger.error("Generated audio file is empty")
+                        await self.sio.emit('audio_error', {
+                            'error': 'Generated audio file is empty'
+                        }, room=sid)
+                        return
+                    
+                    audio_base64 = base64.b64encode(audio_file_data).decode('utf-8')
+                    
+                    await self.sio.emit('test_tts_response', {
+                        'text': text,
+                        'persona': persona,
+                        'audio_data': audio_base64
+                    }, room=sid)
+                    
+                    logger.info(f"Test TTS response sent successfully - audio size: {len(audio_file_data)} bytes")
+                    
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_audio_path)
+                    except:
+                        pass
+                        
+            except Exception as e:
+                logger.error(f"Error processing test TTS: {e}")
+                await self.sio.emit('audio_error', {
+                    'error': f'Test TTS error: {str(e)}'
+                }, room=sid)
+        
+        @self.sio.event
+        async def debug_ping(sid, data):
+            """Handle debug ping for WebSocket testing"""
+            logger.info(f"Debug ping received from {sid}: {data}")
+            await self.sio.emit('debug_pong', {
+                'timestamp': data.get('timestamp'),
+                'server_time': __import__('time').time() * 1000,
+                'message': 'WebSocket connection is working!'
+            }, room=sid)
     
     async def _on_transcription_ready(self, session_id: str, audio_file_path: str):
         """Called when audio is ready for transcription"""
@@ -257,6 +365,9 @@ class AudioWebSocketHandler:
             
             logger.info(f"AI response sent for session {session_id}")
             
+            # Generate TTS audio for the AI response
+            await self._generate_tts_for_response(session_id, response['message'], session_data['socket_id'])
+            
         except Exception as e:
             logger.error(f"Error processing transcription: {e}")
             session_data = self.active_sessions.get(session_id)
@@ -287,6 +398,182 @@ class AudioWebSocketHandler:
     def get_active_sessions(self) -> Dict[str, Dict[str, Any]]:
         """Get all active sessions"""
         return self.active_sessions.copy()
+    
+    async def _process_speech_segment(self, session_id: str, audio_data: bytes, socket_id: str):
+        """Process a complete speech segment - transcribe and generate AI response"""
+        try:
+            logger.info(f"Processing speech segment for session {session_id}")
+            
+            # Save audio to temporary file for transcription
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                temp_file.write(audio_data)
+                temp_file_path = temp_file.name
+            
+            try:
+                # Import transcription service
+                from app.services.transcription import transcribe_audio
+                
+                # Transcribe the audio
+                transcript = transcribe_audio(temp_file_path)
+                logger.info(f"Transcription result: {transcript}")
+                
+                # Send transcription to client
+                await self.sio.emit('transcription_result', {
+                    'session_id': session_id,
+                    'transcript': transcript
+                }, room=socket_id)
+                
+                # Generate AI response
+                if transcript.strip():
+                    await self._generate_ai_response(session_id, transcript, socket_id)
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error processing speech segment: {e}")
+            await self.sio.emit('audio_error', {
+                'error': f'Speech processing error: {str(e)}'
+            }, room=socket_id)
+    
+    async def _generate_ai_response(self, session_id: str, transcript: str, socket_id: str):
+        """Generate AI response and convert to speech"""
+        try:
+            # Get session data
+            session_data = self.active_sessions.get(session_id, {})
+            persona = session_data.get('persona', 'friendly')
+            
+            # Import AI services
+            from app.services.langgraph_workflow import process_pitch_message_async
+            from app.services.enhanced_text_to_speech import convert_text_to_speech_with_persona
+            
+            # Generate AI response using LangGraph workflow
+            ai_response = await process_pitch_message_async(session_id, transcript)
+            logger.info(f"AI response generated: {ai_response}")
+            
+            # Send AI response to client
+            await self.sio.emit('ai_response', {
+                'session_id': session_id,
+                'message': ai_response
+            }, room=socket_id)
+            
+            # Convert to speech and send audio
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                temp_audio_path = temp_file.name
+            
+            try:
+                # Generate TTS audio using enhanced_text_to_speech
+                logger.info(f"Generating TTS for AI response: '{ai_response[:50]}...' with persona: {persona}")
+                audio_result = convert_text_to_speech_with_persona(ai_response, persona, temp_audio_path)
+                
+                if audio_result is None:
+                    logger.error("Google Cloud TTS failed - no audio generated")
+                    # Don't send audio response, let frontend use fallback
+                    return
+                
+                # Check if file was created and has content
+                if not os.path.exists(temp_audio_path) or os.path.getsize(temp_audio_path) == 0:
+                    logger.error(f"TTS audio file not created or empty: {temp_audio_path}")
+                    return
+                
+                # Read audio file and send to client
+                with open(temp_audio_path, 'rb') as audio_file:
+                    audio_file_data = audio_file.read()
+                
+                import base64
+                audio_base64 = base64.b64encode(audio_file_data).decode('utf-8')
+                
+                logger.info(f"Sending ai_audio_response event to room: {socket_id}")
+                await self.sio.emit('ai_audio_response', {
+                    'session_id': session_id,
+                    'audio_data': audio_base64,
+                    'message': ai_response
+                }, room=socket_id)
+                
+                logger.info(f"AI audio response sent successfully - size: {len(audio_file_data)} bytes, base64 size: {len(audio_base64)} chars")
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_audio_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error generating AI response: {e}")
+            await self.sio.emit('audio_error', {
+                'error': f'AI response error: {str(e)}'
+            }, room=socket_id)
+    
+    async def _generate_tts_for_response(self, session_id: str, ai_response: str, socket_id: str):
+        """Generate TTS audio for an AI response"""
+        try:
+            # Get session data
+            session_data = self.active_sessions.get(session_id, {})
+            persona = session_data.get('persona', 'friendly')
+            
+            # Import TTS service
+            from app.services.enhanced_text_to_speech import convert_text_to_speech_with_persona
+            
+            # Convert to speech and send audio
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                temp_audio_path = temp_file.name
+            
+            try:
+                # Generate TTS audio using enhanced_text_to_speech
+                logger.info(f"Generating TTS for response: '{ai_response[:50]}...' with persona: {persona}")
+                audio_result = convert_text_to_speech_with_persona(ai_response, persona, temp_audio_path)
+                
+                if audio_result is None:
+                    logger.error("Google Cloud TTS failed for response - no audio generated")
+                    return
+                
+                # Check if file was created and has content
+                if not os.path.exists(temp_audio_path) or os.path.getsize(temp_audio_path) == 0:
+                    logger.error(f"TTS audio file not created or empty: {temp_audio_path}")
+                    return
+                
+                # Read audio file and send to client
+                with open(temp_audio_path, 'rb') as audio_file:
+                    audio_file_data = audio_file.read()
+                
+                import base64
+                audio_base64 = base64.b64encode(audio_file_data).decode('utf-8')
+                
+                logger.info(f"Sending ai_audio_response event to room: {socket_id}")
+                await self.sio.emit('ai_audio_response', {
+                    'session_id': session_id,
+                    'audio_data': audio_base64,
+                    'message': ai_response
+                }, room=socket_id)
+                
+                logger.info(f"TTS audio response sent successfully - size: {len(audio_file_data)} bytes, base64 size: {len(audio_base64)} chars")
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_audio_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error generating TTS for response: {e}")
+            await self.sio.emit('audio_error', {
+                'error': f'TTS generation error: {str(e)}'
+            }, room=socket_id)
 
 # Global handler instance
 audio_websocket_handler: Optional[AudioWebSocketHandler] = None

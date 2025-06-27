@@ -51,6 +51,17 @@ except ImportError as e:
     logger.warning(f"VAD services not available: {e}")
     VAD_AVAILABLE = False
 
+# Import video analysis services
+try:
+    from app.services.video_analysis import initialize_video_analyzer
+    from app.services.enhanced_video_analysis import initialize_enhanced_video_analyzer, get_enhanced_video_analyzer
+    from app.services.video_websocket_handler import initialize_video_websocket_handler
+    VIDEO_ANALYSIS_AVAILABLE = True
+    logger.info("Video analysis services imported successfully")
+except ImportError as e:
+    logger.warning(f"Video analysis services not available: {e}")
+    VIDEO_ANALYSIS_AVAILABLE = False
+
 from app.services.intelligent_ai_agent_improved import (
     start_improved_conversation,
     generate_improved_response,
@@ -59,7 +70,7 @@ from app.services.intelligent_ai_agent_improved import (
 )
 
 # Import database components
-from app.database import connect_to_mongo, close_mongo_connection, get_database
+from app.database import connect_to_mongo, close_mongo_connection, get_database, test_database_connection
 from app.services.database_service import DatabaseService
 from app.models import PitchAnalysis, PitchSession
 
@@ -105,6 +116,20 @@ if VAD_AVAILABLE:
 else:
     logger.warning("VAD system not available - audio features disabled")
 
+# Initialize video analysis system (if available)
+if VIDEO_ANALYSIS_AVAILABLE:
+    try:
+        initialize_video_analyzer()
+        initialize_enhanced_video_analyzer()  # Initialize enhanced analyzer
+        initialize_video_websocket_handler(sio)
+        logger.info("Video analysis system initialized successfully")
+        logger.info("Enhanced video analysis with CVZone, FER, and MediaPipe ready")
+    except Exception as e:
+        logger.error(f"Failed to initialize video analysis system: {e}")
+        VIDEO_ANALYSIS_AVAILABLE = False
+else:
+    logger.warning("Video analysis system not available - video features disabled")
+
 # Create ASGI app with Socket.IO and FastAPI
 app = socketio.ASGIApp(
     socketio_server=sio,
@@ -142,10 +167,15 @@ async def startup_database():
     try:
         await connect_to_mongo()
         database = await get_database()
-        db_service = DatabaseService(database)
-        logger.info("Database service initialized successfully")
+        if database is not None:
+            db_service = DatabaseService(database)
+            logger.info("✅ Database service initialized successfully")
+        else:
+            logger.warning("⚠️ Database not available - running without persistence")
+            db_service = None
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.warning(f"⚠️ Database connection failed: {e}")
+        logger.info("📝 Application starting without database - TTS and conversation features will work normally")
         # Don't raise here to allow app to start even if DB is unavailable
         db_service = None
 
@@ -235,40 +265,50 @@ def cleanup_old_audio_files(session_id: str, keep_count: int = 5):
         logger.error(f"Error during audio cleanup: {e}")
 
 
+
 @fastapi_app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    """Main page - Hybrid Voice Activity Detection with TTS"""
-    return templates.TemplateResponse("hybrid_vad_main.html", {"request": request})
+async def multimodal_clean_page(request: Request):
+    """Serve the Clean Multimodal Pitch Analysis demo page"""
+    return templates.TemplateResponse("multimodal_pitch_demo_clean.html", {"request": request})
+@fastapi_app.get("/database-test", response_class=HTMLResponse)
+async def database_test_page(request: Request):
+    """Serve the Database Connection Test page"""
+    return templates.TemplateResponse("database_test.html", {"request": request})
 
-@fastapi_app.get("/original", response_class=HTMLResponse)
-async def original_interface(request: Request):
-    """Original interface for reference"""
-    return templates.TemplateResponse("index.html", {"request": request})
+@fastapi_app.get("/api/database/test")
+async def test_database():
+    """Test database connection"""
+    try:
+        success = await test_database_connection()
+        if success:
+            return {
+                "status": "success",
+                "message": "Database connection successful",
+                "database_name": db_service.database.name if db_service else "Not connected",
+                "connected": db_service is not None
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Database connection failed",
+                "connected": False
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Database test error: {str(e)}",
+            "connected": False
+        }
 
-@fastapi_app.get("/pitch-analysis/{session_id}", response_class=HTMLResponse)
-async def pitch_analysis_page(request: Request, session_id: str):
-    """Serve the pitch analysis page"""
-    return templates.TemplateResponse("pitch_analysis.html", {"request": request, "session_id": session_id})
-
-@fastapi_app.get("/vad-demo", response_class=HTMLResponse)
-async def vad_demo_page(request: Request):
-    """Serve the Voice Activity Detection demo page"""
-    return templates.TemplateResponse("vad_demo.html", {"request": request})
-
-@fastapi_app.get("/socketio-test", response_class=HTMLResponse)
-async def socketio_test_page(request: Request):
-    """Serve the Socket.IO connection test page"""
-    return templates.TemplateResponse("socketio_test.html", {"request": request})
-
-@fastapi_app.get("/transcription-demo", response_class=HTMLResponse)
-async def transcription_demo_page(request: Request):
-    """Serve the transcription modes comparison demo"""
-    return templates.TemplateResponse("transcription_demo.html", {"request": request})
-
-@fastapi_app.get("/hybrid-vad", response_class=HTMLResponse)
-async def hybrid_vad_demo_page(request: Request):
-    """Serve the Hybrid Voice Activity Detection demo page"""
-    return templates.TemplateResponse("hybrid_vad_demo.html", {"request": request})
+@fastapi_app.get("/api/database/status")
+async def database_status():
+    """Get current database status"""
+    return {
+        "connected": db_service is not None,
+        "database_name": db_service.database.name if db_service else None,
+        "connection_string": "mongodb://localhost:27017" if db_service else None,
+        "status": "connected" if db_service else "disconnected"
+    }
 
 
 @fastapi_app.post("/pitch")

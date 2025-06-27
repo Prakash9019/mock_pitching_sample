@@ -63,6 +63,13 @@ class PitchWorkflowState(TypedDict):
     stage_durations: Dict[str, float]
     questions_asked: List[str]
     key_insights: Dict[str, List[str]]
+    
+    # Video analysis integration
+    video_analysis_enabled: bool
+    video_insights: List[str]
+    gesture_feedback: List[str]
+    posture_feedback: List[str]
+    expression_feedback: List[str]
 
 class PitchWorkflowAgent:
     """LangGraph-based pitch practice workflow"""
@@ -1261,6 +1268,9 @@ Generate your next question as {persona_info['name']}, applying your characteris
             STAGE-BY-STAGE INSIGHTS ANALYSIS:
             {json.dumps(analytics['key_insights'], indent=2)}
             
+            VIDEO ANALYSIS INTEGRATION:
+            {self._generate_video_analysis_summary(state)}
+            
             COMPLETE CONVERSATION TRANSCRIPT:
             {self._format_conversation_for_analysis(state['messages'])}
             
@@ -1273,17 +1283,24 @@ Generate your next question as {persona_info['name']}, applying your characteris
             - Analyze market understanding and competitive positioning
             - Review financial projections and business model viability
             
-            2. COMMUNICATION ANALYSIS (30% of overall score):
+            2. COMMUNICATION ANALYSIS (20% of overall score):
             - Engagement balance and conversational flow
             - Speaking fluency and confidence indicators
             - Interactive responsiveness and adaptability
             - Question-asking behavior and investor engagement
             
-            3. INVESTOR READINESS ASSESSMENT:
+            3. VIDEO ANALYSIS INTEGRATION (10% of overall score):
+            - Body language and posture assessment
+            - Hand gesture effectiveness and engagement
+            - Facial expression and confidence indicators
+            - Overall presentation presence and charisma
+            
+            4. INVESTOR READINESS ASSESSMENT:
             - Overall pitch maturity and sophistication
             - Ability to handle challenging questions
             - Demonstration of coachability and learning
             - Market timing and opportunity assessment
+            - Professional presentation presence and confidence
             
             SCORING METHODOLOGY:
             Use a rigorous 100-point scale with the following calibration:
@@ -1375,12 +1392,55 @@ Generate your next question as {persona_info['name']}, applying your characteris
                         "conversation_turns": {comm_metrics['interactivity']['conversation_turns']},
                         "turn_frequency": {comm_metrics['interactivity']['turn_frequency']}
                     }},
+                    "body_language": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on posture, gestures, and physical presence>",
+                        "gesture_effectiveness": "<Assessment of hand gesture usage>",
+                        "posture_assessment": "<Evaluation of body posture and engagement>",
+                        "overall_presence": "<Overall physical presentation assessment>"
+                    }},
                     "questions_asked": {{
                         "score": <score 0-10>,
                         "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
                         "description": "<Detailed feedback on question asking frequency and quality>",
                         "total_questions": {comm_metrics['questions_asked']['founder_questions']},
                         "questions_per_minute": {comm_metrics['questions_asked']['questions_per_minute']}
+                    }},
+                    "body_language": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on posture, gestures, and physical presence>",
+                        "gesture_effectiveness": "<Assessment of hand gesture usage>",
+                        "posture_assessment": "<Evaluation of body posture and engagement>",
+                        "overall_presence": "<Overall physical presentation assessment>"
+                    }},
+                    "presentation_presence": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on facial expressions, eye contact, and charisma>",
+                        "facial_expressions": "<Assessment of facial expression effectiveness>",
+                        "eye_contact": "<Evaluation of eye contact and engagement>",
+                        "confidence_indicators": "<Analysis of confidence through visual cues>"
+                    }}
+                        "total_questions": {comm_metrics['questions_asked']['founder_questions']},
+                        "questions_per_minute": {comm_metrics['questions_asked']['questions_per_minute']}
+                    }},
+                    "body_language": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on posture, gestures, and physical presence>",
+                        "gesture_effectiveness": "<Assessment of hand gesture usage>",
+                        "posture_assessment": "<Evaluation of body posture and engagement>",
+                        "overall_presence": "<Overall physical presentation assessment>"
+                    }},
+                    "presentation_presence": {{
+                        "score": <score out of 100>,
+                        "rating": "<Need to Improve/Below Average/Satisfactory/Good/Vertx Assured>",
+                        "description": "<Detailed feedback on facial expressions, eye contact, and charisma>",
+                        "facial_expressions": "<Assessment of facial expression effectiveness>",
+                        "eye_contact": "<Evaluation of eye contact and engagement>",
+                        "confidence_indicators": "<Analysis of confidence through visual cues>"
                     }}
                 }},
                 "strengths": [
@@ -1417,7 +1477,7 @@ Generate your next question as {persona_info['name']}, applying your characteris
                 ]
             }}
             
-            Base your analysis on these 14 key categories:
+            Base your analysis on these 16 key categories:
             
             CONTENT CATEGORIES:
             1. HOOKS & STORY: Opening engagement, storytelling ability, emotional connection
@@ -1436,6 +1496,10 @@ Generate your next question as {persona_info['name']}, applying your characteris
             12. FLUENCY: How smoothly and confidently you speak. Analyzed through fillers (um, uh, like), grammar issues, and vocabulary richness.
             13. INTERACTIVITY: How frequently the conversation shifted between you and the investor, rated on a 0–10 scale. Higher scores indicate better conversational flow.
             14. QUESTIONS ASKED: Number of questions asked per minute, rated on a 0–10 scale. Shows engagement and curiosity about investor perspective.
+            
+            VIDEO ANALYSIS CATEGORIES:
+            15. BODY LANGUAGE: Posture, engagement level, and overall physical presence. Includes gesture effectiveness and professional demeanor.
+            16. PRESENTATION PRESENCE: Facial expressions, eye contact, confidence indicators, and overall charisma during the pitch.
             
             ADDITIONAL ANALYSIS SECTIONS:
             - FOUNDER PERFORMANCE: Specific aspects of founder's performance with titles and detailed descriptions (e.g., "Opener Effectiveness", "Confidence Level", "Storytelling Ability", "Technical Knowledge", "Vision Communication")
@@ -1609,6 +1673,27 @@ Generate your next question as {persona_info['name']}, applying your characteris
         
         # Generate basic category scores
         base_category_score = max(30, overall_score - 20)  # Base score for each category
+        
+        # Calculate video analysis scores if available
+        video_enabled = state.get('video_analysis_enabled', False)
+        video_insights = state.get('video_insights', [])
+        gesture_feedback = state.get('gesture_feedback', [])
+        posture_feedback = state.get('posture_feedback', [])
+        expression_feedback = state.get('expression_feedback', [])
+        
+        # Video analysis scoring
+        body_language_score = base_category_score
+        presentation_presence_score = base_category_score
+        
+        if video_enabled and (video_insights or gesture_feedback or posture_feedback or expression_feedback):
+            # Calculate video scores based on feedback
+            positive_feedback = len([f for f in gesture_feedback + posture_feedback + expression_feedback 
+                                   if any(word in f.lower() for word in ['excellent', 'strong', 'confident', 'positive'])])
+            negative_feedback = len([f for f in gesture_feedback + posture_feedback + expression_feedback 
+                                   if any(word in f.lower() for word in ['poor', 'nervous', 'disengaged', 'negative'])])
+            
+            body_language_score = max(20, min(95, base_category_score + (positive_feedback * 10) - (negative_feedback * 15)))
+            presentation_presence_score = max(20, min(95, base_category_score + (positive_feedback * 8) - (negative_feedback * 12)))
         category_scores = {
             "hooks_story": {
                 "score": base_category_score,
@@ -1690,6 +1775,22 @@ Generate your next question as {persona_info['name']}, applying your characteris
                 "description": f"Question engagement: {comm_metrics['questions_asked']['founder_questions']} questions at {comm_metrics['questions_asked']['questions_per_minute']:.2f} per minute",
                 "total_questions": comm_metrics['questions_asked']['founder_questions'],
                 "questions_per_minute": comm_metrics['questions_asked']['questions_per_minute']
+            },
+            "body_language": {
+                "score": body_language_score,
+                "rating": get_rating(body_language_score),
+                "description": f"Body language assessment: {'Video analysis active' if video_enabled else 'Video analysis not available'} - {len(gesture_feedback)} gesture observations, {len(posture_feedback)} posture assessments",
+                "gesture_effectiveness": f"{len(gesture_feedback)} gestures analyzed" if video_enabled else "Not analyzed",
+                "posture_assessment": f"{len(posture_feedback)} posture observations" if video_enabled else "Not analyzed",
+                "overall_presence": "Good physical presence" if body_language_score >= 70 else "Needs improvement"
+            },
+            "presentation_presence": {
+                "score": presentation_presence_score,
+                "rating": get_rating(presentation_presence_score),
+                "description": f"Presentation presence: {'Video analysis active' if video_enabled else 'Video analysis not available'} - {len(expression_feedback)} expression observations",
+                "facial_expressions": f"{len(expression_feedback)} expressions analyzed" if video_enabled else "Not analyzed",
+                "eye_contact": "Good eye contact maintained" if presentation_presence_score >= 70 else "Needs improvement",
+                "confidence_indicators": "Strong confidence signals" if presentation_presence_score >= 80 else "Moderate confidence" if presentation_presence_score >= 60 else "Low confidence indicators"
             }
         }
         
@@ -1712,7 +1813,7 @@ Generate your next question as {persona_info['name']}, applying your characteris
             "strengths": [
                 {"area": "Engagement", "description": f"Completed {stages_completed} stages showing good engagement", "score": min(stages_completed, 10)},
                 {"area": "Detail", "description": f"Provided {total_insights} key insights across stages", "score": min(total_insights // 2, 10)}
-            ],
+            ] + ([{"area": "Video Analysis", "description": f"Video analysis active with {len(video_insights)} insights captured", "score": min(len(video_insights), 10)}] if video_enabled else []),
             "weaknesses": [
                 {"area": "Completion", "description": f"Only completed {stages_completed}/9 stages", "improvement": "Complete all pitch stages for comprehensive feedback"}
             ] if stages_completed < 9 else [],
@@ -1722,7 +1823,9 @@ Generate your next question as {persona_info['name']}, applying your characteris
                 "Practice articulating value proposition clearly",
                 "Strengthen competitive differentiation",
                 "Develop more impactful closing statements"
-            ],
+            ] + (["Leverage video analysis insights to improve body language and presentation presence",
+                  "Focus on confident gestures and posture during key pitch moments"] if video_enabled else 
+                 ["Enable video analysis for comprehensive presentation feedback"]),
             "investor_perspective": f"Based on {stages_completed} completed stages, this pitch shows {'good potential' if overall_score >= 60 else 'needs improvement'}. Focus on completing all categories for investor readiness.",
             "next_steps": [
                 "Complete remaining pitch stages" if stages_completed < 9 else "Practice with different investor personas",
@@ -1790,6 +1893,273 @@ Generate your next question as {persona_info['name']}, applying your characteris
         except Exception as e:
             logger.error(f"Error ending session with analysis: {e}")
             return {"error": "Failed to generate session analysis"}
+    
+    def _generate_video_analysis_summary(self, state: Dict[str, Any]) -> str:
+        """Generate comprehensive video analysis summary for pitch analysis"""
+        
+        if not state.get('video_analysis_enabled', False):
+            return "Video Analysis: Not available for this session"
+        
+        video_insights = state.get('video_insights', [])
+        gesture_feedback = state.get('gesture_feedback', [])
+        posture_feedback = state.get('posture_feedback', [])
+        expression_feedback = state.get('expression_feedback', [])
+        
+        # Create stage-specific video analysis summary
+        stage_objectives = {
+            "greeting": "Get the founder's name, company name, and a brief introduction",
+            "problem_solution": "Understand the core problem they're solving and their solution approach",
+            "target_market": "Identify their target customers and market opportunity",
+            "business_model": "Understand how they make money and their pricing strategy",
+            "competition": "Learn about their competitive landscape and differentiation",
+            "traction": "Assess their current progress, metrics, and growth",
+            "team": "Evaluate the team's experience and composition",
+            "funding_needs": "Understand their funding requirements and use of funds",
+            "future_plans": "Discuss their vision and long-term strategy"
+        }
+        
+        current_stage = state.get('current_stage', 'unknown')
+        stage_progress = state.get('stage_progress', {})
+        
+        summary_parts = []
+        
+        # Overall video analysis status
+        summary_parts.append("VIDEO ANALYSIS SUMMARY:")
+        summary_parts.append(f"- Video Analysis Status: ACTIVE")
+        summary_parts.append(f"- Current Stage: {current_stage}")
+        summary_parts.append(f"- Stage Objective: {stage_objectives.get(current_stage, 'Unknown stage')}")
+        
+        # Video insights summary
+        if video_insights:
+            summary_parts.append(f"\nKEY VIDEO INSIGHTS ({len(video_insights)} total):")
+            for insight in video_insights[-5:]:  # Last 5 insights
+                summary_parts.append(f"  • {insight}")
+        else:
+            summary_parts.append(f"\nKEY VIDEO INSIGHTS: No significant insights detected yet")
+        
+        # Gesture analysis
+        if gesture_feedback:
+            summary_parts.append(f"\nHAND GESTURE ANALYSIS ({len(gesture_feedback)} observations):")
+            for gesture in gesture_feedback[-3:]:  # Last 3 gestures
+                summary_parts.append(f"  • {gesture}")
+        else:
+            summary_parts.append(f"\nHAND GESTURE ANALYSIS: Limited hand gesture activity detected")
+        
+        # Posture analysis
+        if posture_feedback:
+            summary_parts.append(f"\nPOSTURE & BODY LANGUAGE ({len(posture_feedback)} observations):")
+            for posture in posture_feedback[-3:]:  # Last 3 posture observations
+                summary_parts.append(f"  • {posture}")
+        else:
+            summary_parts.append(f"\nPOSTURE & BODY LANGUAGE: Neutral posture maintained")
+        
+        # Expression analysis
+        if expression_feedback:
+            summary_parts.append(f"\nFACIAL EXPRESSION ANALYSIS ({len(expression_feedback)} observations):")
+            for expression in expression_feedback[-3:]:  # Last 3 expressions
+                summary_parts.append(f"  • {expression}")
+        else:
+            summary_parts.append(f"\nFACIAL EXPRESSION ANALYSIS: Neutral expressions observed")
+        
+        # Stage-specific video performance summary
+        summary_parts.append(f"\nSTAGE-SPECIFIC VIDEO PERFORMANCE ANALYSIS:")
+        
+        # Analyze video performance by stage with detailed assessment
+        for stage, objective in stage_objectives.items():
+            stage_info = stage_progress.get(stage, {})
+            questions_asked = stage_info.get('questions_asked', 0)
+            
+            if questions_asked > 0:
+                # This stage was covered - provide detailed analysis
+                stage_video_insights = [insight for insight in video_insights if stage in insight.lower()]
+                stage_gestures = [gesture for gesture in gesture_feedback if stage in gesture.lower()]
+                stage_posture = [posture for posture in posture_feedback if stage in posture.lower()]
+                stage_expressions = [expr for expr in expression_feedback if stage in expr.lower()]
+                
+                summary_parts.append(f"\n  📋 {stage.upper().replace('_', ' ')} STAGE:")
+                summary_parts.append(f"     Objective: {objective}")
+                summary_parts.append(f"     Questions Covered: {questions_asked}")
+                
+                # Video performance assessment for this stage
+                stage_video_score = self._calculate_stage_video_score(
+                    stage_video_insights, stage_gestures, stage_posture, stage_expressions
+                )
+                
+                summary_parts.append(f"     Video Performance Score: {stage_video_score}/100")
+                
+                # Detailed stage analysis
+                if stage_video_insights:
+                    summary_parts.append(f"     ✅ Key Video Insights ({len(stage_video_insights)}):")
+                    for insight in stage_video_insights[-2:]:
+                        summary_parts.append(f"        • {insight}")
+                
+                if stage_gestures:
+                    summary_parts.append(f"     👋 Gesture Analysis:")
+                    for gesture in stage_gestures[-1:]:
+                        summary_parts.append(f"        • {gesture}")
+                
+                if stage_posture:
+                    summary_parts.append(f"     🧍 Posture Assessment:")
+                    for posture in stage_posture[-1:]:
+                        summary_parts.append(f"        • {posture}")
+                
+                if stage_expressions:
+                    summary_parts.append(f"     😊 Expression Analysis:")
+                    for expr in stage_expressions[-1:]:
+                        summary_parts.append(f"        • {expr}")
+                
+                # Stage-specific recommendations
+                stage_recommendations = self._generate_stage_video_recommendations(
+                    stage, stage_video_insights, stage_gestures, stage_posture, stage_expressions
+                )
+                if stage_recommendations:
+                    summary_parts.append(f"     💡 Stage Recommendations:")
+                    for rec in stage_recommendations:
+                        summary_parts.append(f"        • {rec}")
+                
+            else:
+                # Stage not covered yet
+                summary_parts.append(f"\n  ⏳ {stage.upper().replace('_', ' ')} STAGE:")
+                summary_parts.append(f"     Objective: {objective}")
+                summary_parts.append(f"     Status: Not yet covered")
+                summary_parts.append(f"     Video Analysis: Pending stage completion")
+        
+        # Overall video analysis recommendations
+        summary_parts.append(f"\nVIDEO ANALYSIS RECOMMENDATIONS:")
+        
+        # Generate recommendations based on collected data
+        recommendations = []
+        
+        if len(gesture_feedback) < 3:
+            recommendations.append("Increase hand gesture usage to enhance engagement and emphasis")
+        
+        if any("nervous" in feedback.lower() or "disengaged" in feedback.lower() 
+               for feedback in posture_feedback + expression_feedback):
+            recommendations.append("Focus on confident posture and positive facial expressions")
+        
+        if len(video_insights) < 5:
+            recommendations.append("Maintain consistent eye contact and dynamic presentation style")
+        
+        if not recommendations:
+            recommendations.append("Continue current presentation style - video analysis shows good engagement")
+        
+        for rec in recommendations:
+            summary_parts.append(f"  • {rec}")
+        
+        return "\n".join(summary_parts)
+    
+    def _calculate_stage_video_score(self, insights: List[str], gestures: List[str], 
+                                   posture: List[str], expressions: List[str]) -> int:
+        """Calculate video performance score for a specific stage"""
+        base_score = 60  # Base score
+        
+        # Add points for positive indicators
+        score_adjustments = 0
+        
+        # Insights scoring
+        if insights:
+            positive_insights = [i for i in insights if any(word in i.lower() 
+                               for word in ['effective', 'strong', 'excellent', 'confident', 'engaged'])]
+            score_adjustments += len(positive_insights) * 5
+        
+        # Gesture scoring
+        if gestures:
+            positive_gestures = [g for g in gestures if any(word in g.lower() 
+                               for word in ['strong', 'effective', 'confident'])]
+            score_adjustments += len(positive_gestures) * 8
+        
+        # Posture scoring
+        if posture:
+            positive_posture = [p for p in posture if any(word in p.lower() 
+                              for word in ['excellent', 'engaged', 'confident'])]
+            negative_posture = [p for p in posture if any(word in p.lower() 
+                              for word in ['disengaged', 'poor', 'nervous'])]
+            score_adjustments += len(positive_posture) * 10
+            score_adjustments -= len(negative_posture) * 15
+        
+        # Expression scoring
+        if expressions:
+            positive_expressions = [e for e in expressions if any(word in e.lower() 
+                                  for word in ['positive', 'confident', 'engaged'])]
+            negative_expressions = [e for e in expressions if any(word in e.lower() 
+                                  for word in ['nervous', 'fear', 'negative'])]
+            score_adjustments += len(positive_expressions) * 8
+            score_adjustments -= len(negative_expressions) * 12
+        
+        final_score = max(0, min(100, base_score + score_adjustments))
+        return final_score
+    
+    def _generate_stage_video_recommendations(self, stage: str, insights: List[str], 
+                                            gestures: List[str], posture: List[str], 
+                                            expressions: List[str]) -> List[str]:
+        """Generate stage-specific video recommendations"""
+        recommendations = []
+        
+        # Stage-specific recommendations based on objectives
+        stage_specific_advice = {
+            "greeting": [
+                "Maintain warm, welcoming facial expressions during introductions",
+                "Use open hand gestures to appear approachable",
+                "Keep confident posture to make strong first impression"
+            ],
+            "problem_solution": [
+                "Use emphatic gestures when describing the problem urgency",
+                "Lean forward slightly to show engagement with the problem",
+                "Express concern through facial expressions when discussing pain points"
+            ],
+            "target_market": [
+                "Use expansive gestures when describing market size",
+                "Maintain confident posture when discussing market opportunity",
+                "Show enthusiasm through facial expressions about market potential"
+            ],
+            "business_model": [
+                "Use precise hand gestures when explaining revenue streams",
+                "Maintain professional posture during financial discussions",
+                "Show confidence through steady eye contact and expressions"
+            ],
+            "competition": [
+                "Use comparative gestures when discussing competitors",
+                "Stand tall to project competitive confidence",
+                "Express determination through facial expressions"
+            ],
+            "traction": [
+                "Use upward gestures when showing growth metrics",
+                "Display excitement through positive facial expressions",
+                "Maintain energetic posture when discussing achievements"
+            ],
+            "team": [
+                "Use inclusive gestures when introducing team members",
+                "Show pride through confident posture and expressions",
+                "Maintain warm expressions when discussing team strengths"
+            ],
+            "funding_needs": [
+                "Use clear, direct gestures when stating funding amount",
+                "Maintain professional posture during financial asks",
+                "Show conviction through steady expressions and eye contact"
+            ],
+            "future_plans": [
+                "Use forward-pointing gestures when discussing vision",
+                "Display visionary excitement through expressions",
+                "Maintain inspiring posture when outlining future goals"
+            ]
+        }
+        
+        # Add stage-specific advice
+        if stage in stage_specific_advice:
+            recommendations.extend(stage_specific_advice[stage][:2])  # Top 2 recommendations
+        
+        # Add specific recommendations based on detected issues
+        if not gestures:
+            recommendations.append(f"Incorporate more hand gestures during {stage.replace('_', ' ')} discussion")
+        
+        if any('disengaged' in p.lower() for p in posture):
+            recommendations.append(f"Improve posture engagement during {stage.replace('_', ' ')} stage")
+        
+        if any('nervous' in e.lower() for e in expressions):
+            recommendations.append(f"Practice confident facial expressions for {stage.replace('_', ' ')} delivery")
+        
+        # Limit to top 3 recommendations per stage
+        return recommendations[:3]
 
 # Global workflow instance
 pitch_workflow = None

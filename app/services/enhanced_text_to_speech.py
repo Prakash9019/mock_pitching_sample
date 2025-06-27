@@ -84,20 +84,51 @@ class EnhancedTextToSpeech:
                 scopes=['https://www.googleapis.com/auth/cloud-platform']
             )
             
-            # Initialize the client with credentials
-            self.client = texttospeech.TextToSpeechClient(credentials=credentials)
-            logger.info("Google Cloud TTS client initialized successfully")
+            # Initialize the client with credentials and timeout settings
+            from google.api_core import client_options
+            client_opts = client_options.ClientOptions()
+            
+            self.client = texttospeech.TextToSpeechClient(
+                credentials=credentials,
+                client_options=client_opts
+            )
+            logger.info("Google Cloud TTS client initialized successfully with timeout configuration")
             
         except Exception as e:
             logger.error(f"Error initializing Google Cloud TTS client: {str(e)}")
             self.client = None
     
     def convert_text_to_speech_with_persona(self, text: str, persona: str = "friendly", output_path: str = None) -> Optional[bytes]:
-        """Convert text to speech with persona-specific voice"""
+        """Convert text to speech with persona-specific voice - WILL RETRY TO ENSURE SUCCESS"""
         if not self.client:
             logger.error("Google Cloud TTS client not initialized")
             return None
-            
+        
+        # Retry logic - try up to 3 times to ensure TTS works
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Retrying Google Cloud TTS (attempt {attempt + 1}/{max_retries})")
+                    
+                return self._synthesize_speech_internal(text, persona, output_path)
+                
+            except Exception as e:
+                logger.error(f"TTS attempt {attempt + 1} failed: {str(e)}")
+                if attempt == max_retries - 1:
+                    # Last attempt failed
+                    import traceback
+                    logger.error(f"All TTS attempts failed. Full traceback: {traceback.format_exc()}")
+                    return None
+                else:
+                    # Wait a bit before retrying
+                    import time
+                    time.sleep(0.5)
+        
+        return None
+    
+    def _synthesize_speech_internal(self, text: str, persona: str, output_path: str = None) -> Optional[bytes]:
+        """Internal method to perform the actual TTS synthesis"""
         try:
             logger.info(f"Converting text to speech with {persona} persona (text length: {len(text)} chars)")
             
@@ -122,19 +153,32 @@ class EnhancedTextToSpeech:
                 volume_gain_db=voice_config["volume_gain_db"]
             )
 
-            # Perform the text-to-speech request
+            # Perform the text-to-speech request with timeout
+            import time
+            start_time = time.time()
+            logger.info(f"Starting Google Cloud TTS synthesis for {len(text)} characters...")
+            
+            # Add timeout to the request (15 seconds max to ensure it completes)
             response = self.client.synthesize_speech(
                 input=synthesis_input,
                 voice=voice,
-                audio_config=audio_config
+                audio_config=audio_config,
+                timeout=15.0  # 15 second timeout - generous to ensure completion
             )
+            
+            synthesis_time = time.time() - start_time
+            logger.info(f"Google Cloud TTS synthesis completed in {synthesis_time:.2f} seconds")
             
             # The response's audio_content is binary
             audio_data = response.audio_content
             
             # Save to file if output_path is provided
             if output_path:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                # Create directory only if output_path contains a directory
+                output_dir = os.path.dirname(output_path)
+                if output_dir:  # Only create directory if it's not empty
+                    os.makedirs(output_dir, exist_ok=True)
+                
                 with open(output_path, 'wb') as out:
                     out.write(audio_data)
                 logger.info(f"Saved audio to: {output_path}")
@@ -143,8 +187,15 @@ class EnhancedTextToSpeech:
             return audio_data
             
         except Exception as e:
-            logger.error(f"Error converting text to speech: {str(e)}")
-            return None
+            import traceback
+            logger.error(f"Error in TTS synthesis: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Check if it's a timeout error
+            if "timeout" in str(e).lower() or "deadline" in str(e).lower():
+                logger.error("Google Cloud TTS request timed out")
+            
+            raise e  # Re-raise to be caught by retry logic
     
     def get_available_voices(self) -> Dict:
         """Get list of available voices for each persona"""

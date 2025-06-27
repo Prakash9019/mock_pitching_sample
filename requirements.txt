@@ -93,3 +93,9 @@ zstandard==0.23.0
 pymongo==4.13.2
 motor==3.7.1
 dnspython==2.7.0
+opencv-python==4.10.0.84
+mediapipe==0.10.20
+fer==22.5.1
+moviepy==1.0.3
+cvzone==1.6.1
+tensorflow==2.19.0

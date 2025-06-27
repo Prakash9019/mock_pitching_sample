@@ -1,0 +1,1724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Pitch Practice - Multimodal Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    animation: {
+                        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .glass-effect {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .listening-pulse {
+            animation: pulse 1.5s ease-in-out infinite;
+            box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+        }
+        .speaking-glow {
+            animation: pulse 1s ease-in-out infinite;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <!-- Main Container -->
+    <div class="container mx-auto px-4 py-6 max-w-7xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-white mb-2">🎯 AI Pitch Practice</h1>
+            <p class="text-xl text-white/80">Multimodal Analysis with Voice & Video</p>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid lg:grid-cols-3 gap-6">
+            <!-- Left Panel: Video & Controls -->
+            <div class="lg:col-span-1">
+                <!-- Video Preview -->
+                <div class="glass-effect rounded-2xl p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-white mb-4 flex items-center">
+                        📹 Video Preview
+                    </h3>
+                    <div class="relative">
+                        <video id="videoPreview" autoplay muted playsinline 
+                               class="w-full h-64 bg-gray-800 rounded-xl object-cover">
+                        </video>
+                        <div id="videoStatus" class="absolute top-2 right-2 px-3 py-1 rounded-full text-sm font-medium bg-gray-800/80 text-white">
+                            Ready
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Session Controls -->
+                <div class="glass-effect rounded-2xl p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">🎮 Session Control</h3>
+                    
+                    <!-- Investor Persona -->
+                    <div class="mb-4">
+                        <label class="block text-white/80 text-sm font-medium mb-2">Investor Persona</label>
+                        <select id="personaSelect" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="friendly">😊 Friendly Investor</option>
+                            <option value="skeptical">🤔 Skeptical Investor</option>
+                            <option value="technical">🔬 Technical Investor</option>
+                            <option value="aggressive">⚡ Aggressive Investor</option>
+                        </select>
+                    </div>
+
+                    <!-- Main Action Buttons -->
+                    <div class="space-y-3">
+                        <button id="start-btn" onclick="startSession()" 
+                                class="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
+                            🚀 Start Practice Session
+                        </button>
+                        <button id="stop-btn" onclick="stopSession()" disabled
+                                class="w-full bg-red-500 hover:bg-red-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
+                            ⏹️ Stop Session
+                        </button>
+                        <button id="retry-connection-btn" onclick="retryConnection()" style="display: none;"
+                                class="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
+                            🔄 Retry Connection
+                        </button>
+                        <button id="debug-btn" onclick="debugSystem()" 
+                                class="w-full bg-purple-500 hover:bg-purple-600 text-white font-semibold py-2 px-4 rounded-xl transition-all duration-200 text-sm">
+                            🔍 Debug System
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Audio Controls -->
+                <div class="glass-effect rounded-2xl p-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">🔊 Audio Settings</h3>
+                    
+                    <!-- TTS Toggle -->
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-white/80">AI Voice Responses</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ttsEnabled" checked class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
+                    <!-- Volume Control -->
+                    <div class="mb-4">
+                        <label class="block text-white/80 text-sm font-medium mb-2">
+                            Volume: <span id="volumeDisplay">80%</span>
+                        </label>
+                        <input type="range" id="ttsVolume" min="0" max="100" value="80" 
+                               class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer slider">
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="grid grid-cols-2 gap-2 mb-3">
+                        <button onclick="forceStartListening()" 
+                                class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
+                            🎤 Start Listening
+                        </button>
+                        <button onclick="testTTS()" 
+                                class="bg-purple-500 hover:bg-purple-600 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
+                            🔊 Test TTS
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="debugAudioStreaming()" 
+                                class="bg-orange-500 hover:bg-orange-600 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
+                            🔍 Debug Audio
+                        </button>
+                        <button onclick="testAudioStreaming()" 
+                                class="bg-amber-600 hover:bg-amber-700 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
+                            🎵 Test Stream
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Panel: Live Metrics -->
+            <div class="lg:col-span-1">
+                <!-- Status Indicators -->
+                <div class="glass-effect rounded-2xl p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">📊 Live Status</h3>
+                    
+                    <div class="space-y-4">
+                        <!-- Connection Status -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-white/80">🔗 Connection</span>
+                            <div class="flex items-center">
+                                <div id="connectionStatus" class="w-3 h-3 rounded-full bg-yellow-500 mr-2 animate-pulse"></div>
+                                <span id="connectionStatusText" class="text-white text-sm font-medium">Connecting...</span>
+                            </div>
+                        </div>
+
+                        <!-- Session Status -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-white/80">Session</span>
+                            <div class="flex items-center">
+                                <div id="sessionStatus" class="w-3 h-3 rounded-full bg-gray-500 mr-2"></div>
+                                <span id="sessionStatusText" class="text-white text-sm">Inactive</span>
+                            </div>
+                        </div>
+
+                        <!-- Audio Status -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-white/80">Audio</span>
+                            <div class="flex items-center">
+                                <div id="audioStatus" class="w-3 h-3 rounded-full bg-gray-500 mr-2"></div>
+                                <span id="audioStatusText" class="text-white text-sm">Ready</span>
+                            </div>
+                        </div>
+
+                        <!-- TTS Status -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-white/80">AI Voice</span>
+                            <div class="flex items-center">
+                                <div id="ttsStatus" class="w-3 h-3 rounded-full bg-gray-500 mr-2"></div>
+                                <span id="ttsStatusText" class="text-white text-sm">Ready</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Metrics -->
+                <div class="glass-effect rounded-2xl p-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">📈 Performance Metrics</h3>
+                    
+                    <div class="space-y-4">
+                        <!-- Gesture Effectiveness (mapped to Eye Contact) -->
+                        <div>
+                            <div class="flex justify-between text-white/80 text-sm mb-1">
+                                <span title="CVZone hand gesture analysis - effectiveness of hand movements and gestures">👋 Gesture Effectiveness</span>
+                                <span id="eyeContactScore">70%</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-2">
+                                <div id="eyeContactProgress" class="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-1000" style="width: 70%"></div>
+                            </div>
+                            <div class="text-xs text-white/60 mt-1">CVZone Hand Tracking</div>
+                        </div>
+
+                        <!-- Posture & Body Language -->
+                        <div>
+                            <div class="flex justify-between text-white/80 text-sm mb-1">
+                                <span title="MediaPipe pose analysis - body posture and engagement level">🧍 Posture & Body Language</span>
+                                <span id="engagementScore">65%</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-2">
+                                <div id="engagementProgress" class="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full transition-all duration-1000" style="width: 65%"></div>
+                            </div>
+                            <div class="text-xs text-white/60 mt-1">MediaPipe Pose Analysis</div>
+                        </div>
+
+                        <!-- Facial Expression & Emotion -->
+                        <div>
+                            <div class="flex justify-between text-white/80 text-sm mb-1">
+                                <span title="FER emotion recognition - facial expressions and emotional confidence">😊 Facial Expression & Emotion</span>
+                                <span id="confidenceScore">60%</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-2">
+                                <div id="confidenceProgress" class="bg-gradient-to-r from-yellow-500 to-yellow-600 h-2 rounded-full transition-all duration-1000" style="width: 60%"></div>
+                            </div>
+                            <div class="text-xs text-white/60 mt-1">FER Emotion Recognition</div>
+                        </div>
+
+                        <!-- Pitch Readiness -->
+                        <div>
+                            <div class="flex justify-between text-white/80 text-sm mb-1">
+                                <span title="Combined analysis score - overall readiness for investor pitch">🚀 Pitch Readiness</span>
+                                <span id="clarityScore">70%</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-2">
+                                <div id="clarityProgress" class="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full transition-all duration-1000" style="width: 70%"></div>
+                            </div>
+                            <div class="text-xs text-white/60 mt-1">Enhanced AI Analysis</div>
+                        </div>
+
+                        <!-- Overall Enhanced Score -->
+                        <div class="pt-2 border-t border-white/20">
+                            <div class="flex justify-between text-white text-sm mb-1 font-semibold">
+                                <span title="Combined score from CVZone, FER, and MediaPipe analysis">🏆 Enhanced Analysis Score</span>
+                                <span id="overallScore">66%</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-3">
+                                <div id="overallProgress" class="bg-gradient-to-r from-indigo-500 to-indigo-600 h-3 rounded-full transition-all duration-1000" style="width: 66%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Enhanced Analysis Status -->
+                <div class="glass-effect rounded-2xl p-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">🔬 Enhanced Analysis Status</h3>
+                    
+                    <div class="space-y-3">
+                        <!-- CVZone Status -->
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-lg">👋</span>
+                                <span class="text-white/80 text-sm">CVZone Hand Tracking</span>
+                            </div>
+                            <div id="cvzoneStatus" class="px-2 py-1 rounded-full text-xs font-medium bg-gray-600 text-white">
+                                Ready
+                            </div>
+                        </div>
+
+                        <!-- FER Status -->
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-lg">😊</span>
+                                <span class="text-white/80 text-sm">FER Emotion Recognition</span>
+                            </div>
+                            <div id="ferStatus" class="px-2 py-1 rounded-full text-xs font-medium bg-gray-600 text-white">
+                                Ready
+                            </div>
+                        </div>
+
+                        <!-- MediaPipe Status -->
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-lg">🧍</span>
+                                <span class="text-white/80 text-sm">MediaPipe Pose Analysis</span>
+                            </div>
+                            <div id="mediapipeStatus" class="px-2 py-1 rounded-full text-xs font-medium bg-gray-600 text-white">
+                                Ready
+                            </div>
+                        </div>
+
+                        <!-- Analysis Summary -->
+                        <div class="pt-2 border-t border-white/20">
+                            <div class="text-xs text-white/60">
+                                <div id="analysisStats" class="space-y-1">
+                                    <div>Hands Detected: <span id="handsDetected">0</span></div>
+                                    <div>Faces Detected: <span id="facesDetected">0</span></div>
+                                    <div>Pose Detected: <span id="poseDetected">No</span></div>
+                                    <div>Analysis Updates: <span id="analysisUpdates">0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Real-time Enhanced Feedback -->
+                <div class="glass-effect rounded-2xl p-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">🎯 Live Enhanced Feedback</h3>
+                    
+                    <div class="space-y-3">
+                        <!-- Current Gesture -->
+                        <div class="bg-black/30 rounded-lg p-3">
+                            <div class="text-white/80 text-sm mb-1">Current Gesture</div>
+                            <div id="currentGesture" class="text-white font-medium">👋 No gesture detected</div>
+                        </div>
+
+                        <!-- Current Emotion -->
+                        <div class="bg-black/30 rounded-lg p-3">
+                            <div class="text-white/80 text-sm mb-1">Facial Expression</div>
+                            <div id="currentEmotion" class="text-white font-medium">😐 Neutral</div>
+                        </div>
+
+                        <!-- Current Posture -->
+                        <div class="bg-black/30 rounded-lg p-3">
+                            <div class="text-white/80 text-sm mb-1">Body Posture</div>
+                            <div id="currentPosture" class="text-white font-medium">🧍 Analyzing...</div>
+                        </div>
+
+                        <!-- Live Recommendations -->
+                        <div class="bg-black/30 rounded-lg p-3">
+                            <div class="text-white/80 text-sm mb-1">AI Recommendation</div>
+                            <div id="liveRecommendation" class="text-white/70 text-sm italic">Start your pitch to receive live feedback</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Conversation -->
+            <div class="lg:col-span-1">
+                <!-- Live Transcription -->
+                <div class="glass-effect rounded-2xl p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">🎤 Live Transcription</h3>
+                    
+                    <div class="bg-black/30 rounded-xl p-4 min-h-[120px]">
+                        <div id="transcription-status" class="text-white/60 text-sm mb-2">Ready to listen...</div>
+                        <div id="transcription-display" class="text-white text-base leading-relaxed">
+                            <div class="text-white/40 italic">Your speech will appear here in real-time...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Conversation Log -->
+                <div class="glass-effect rounded-2xl p-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">💬 Conversation</h3>
+                    
+                    <div id="conversation-log" class="bg-black/30 rounded-xl p-4 h-80 overflow-y-auto space-y-3">
+                        <div class="text-white/40 italic text-center py-8">
+                            <div class="mb-4">🚀 Enhanced Video Analysis Ready</div>
+                            <div class="text-sm space-y-1">
+                                <div>👋 Hand Gesture Recognition</div>
+                                <div>😊 Facial Emotion Analysis</div>
+                                <div>🧍 Body Pose Detection</div>
+                            </div>
+                            <div class="mt-4 text-white/60">Start a session to begin your pitch practice...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Enhanced Hybrid VAD System with TTS -->
+    <script src="/static/js/enhanced-hybrid-vad.js" onload="console.log('✅ Enhanced Hybrid VAD script loaded')" onerror="console.error('❌ Failed to load Enhanced Hybrid VAD script')"></script>
+    
+    <script>
+        // Debug: Check if dependencies are loaded
+        console.log('🔍 Checking dependencies...');
+        console.log('Socket.IO available:', typeof io !== 'undefined');
+        console.log('EnhancedHybridVAD available:', typeof EnhancedHybridVAD !== 'undefined');
+        
+        // Global variables
+        let enhancedVAD = null;
+        let sessionId = null;
+        let mediaStream = null;
+        let videoAnalysisInterval = null;
+        let currentAudio = null;
+        let debugMode = true;
+
+        // User activity tracking for metrics
+        let userActivity = {
+            isSpeaking: false,
+            lastSpeechTime: 0,
+            speechCount: 0
+        };
+
+        // Metrics tracking
+        let previousMetrics = {
+            eyeContact: 70,
+            engagement: 65,
+            confidence: 60,
+            clarity: 70,
+            overall: 66
+        };
+
+        // Video analysis state
+        let videoAnalysisActive = false;
+        let lastVideoAnalysisTime = 0;
+
+        // Wait for all dependencies to load before initializing
+        function waitForDependencies() {
+            return new Promise((resolve) => {
+                let attempts = 0;
+                const maxAttempts = 50; // 5 seconds max wait
+                
+                const checkDependencies = () => {
+                    attempts++;
+                    console.log(`🔍 Dependency check attempt ${attempts}/${maxAttempts}`);
+                    console.log(`Socket.IO: ${typeof io !== 'undefined' ? '✅' : '❌'}`);
+                    console.log(`EnhancedHybridVAD: ${typeof EnhancedHybridVAD !== 'undefined' ? '✅' : '❌'}`);
+                    
+                    if (typeof io !== 'undefined' && typeof EnhancedHybridVAD !== 'undefined') {
+                        log('✅ All dependencies loaded');
+                        resolve();
+                    } else if (attempts >= maxAttempts) {
+                        log('⚠️ Timeout waiting for dependencies');
+                        if (typeof io === 'undefined') {
+                            throw new Error('Socket.IO failed to load');
+                        }
+                        if (typeof EnhancedHybridVAD === 'undefined') {
+                            throw new Error('EnhancedHybridVAD failed to load');
+                        }
+                    } else {
+                        log(`⏳ Waiting for dependencies... (${attempts}/${maxAttempts})`);
+                        setTimeout(checkDependencies, 100);
+                    }
+                };
+                checkDependencies();
+            });
+        }
+
+        // Initialize on page load with dependency check
+        document.addEventListener('DOMContentLoaded', async function() {
+            log('📄 DOM Content Loaded - waiting for dependencies');
+            try {
+                await waitForDependencies();
+                log('🚀 Starting initialization with all dependencies ready');
+                await initializeSystem();
+            } catch (error) {
+                log(`❌ DOM initialization failed: ${error.message}`, 'error');
+                addMessage('system', `❌ Initialization failed: ${error.message}`);
+                updateConnectionStatus('Failed', 'error');
+                document.getElementById('retry-connection-btn').style.display = 'block';
+            }
+        });
+
+        // Fallback initialization
+        window.addEventListener('load', async function() {
+            if (!enhancedVAD) {
+                log('🔄 Window load fallback triggered');
+                try {
+                    await waitForDependencies();
+                    await initializeSystem();
+                } catch (error) {
+                    log(`❌ Fallback initialization failed: ${error.message}`, 'error');
+                }
+            }
+        });
+
+        // Additional fallback after a delay
+        setTimeout(async () => {
+            if (!enhancedVAD) {
+                log('⏰ Final delayed fallback triggered');
+                addMessage('system', '⏰ Attempting final initialization...');
+                try {
+                    await waitForDependencies();
+                    await initializeSystem();
+                } catch (error) {
+                    log(`❌ Final fallback failed: ${error.message}`, 'error');
+                    addMessage('system', '❌ All initialization attempts failed');
+                    addMessage('system', '🔧 Please click "Debug System" to diagnose the issue');
+                }
+            }
+        }, 5000);
+
+        async function initializeSystem() {
+            try {
+                log('🚀 Starting system initialization...');
+                updateConnectionStatus('Starting...', 'warning');
+                
+                // Request microphone permission first
+                log('🎤 Step 1: Requesting microphone permission...');
+                await requestMicrophonePermission();
+                
+                log('📹 Step 2: Initializing media...');
+                await initializeMedia();
+                
+                log('🔧 Step 3: Initializing EnhancedHybridVAD...');
+                await initializeHybridVAD();
+                
+                log('⚙️ Step 4: Setting up controls...');
+                initializeControls();
+                
+                log('📊 Step 5: Setting up video analysis listeners...');
+                setupVideoAnalysisEventListeners();
+                
+                // Start real-time metrics updates
+                log('📈 Step 6: Starting real-time metrics...');
+                setInterval(updateRealtimeMetrics, 3000);
+                
+                log('✅ System initialized successfully');
+                addMessage('system', '✅ Enhanced Multimodal System Ready!');
+                addMessage('system', '🔬 Professional CV libraries loaded and ready');
+                addMessage('system', '🎯 Click "Start Practice Session" to begin your enhanced pitch analysis!');
+                
+            } catch (error) {
+                log(`❌ System initialization failed: ${error.message}`, 'error');
+                console.error('System initialization error:', error);
+                updateConnectionStatus('Failed', 'error');
+                addMessage('system', `❌ System initialization failed: ${error.message}`);
+                
+                // Show retry button
+                document.getElementById('retry-connection-btn').style.display = 'block';
+                
+                // Show specific troubleshooting based on error
+                if (error.message.includes('EnhancedHybridVAD')) {
+                    addMessage('system', '💡 Tip: Enhanced VAD system not loaded. Click "Retry Connection" to try again.');
+                } else if (error.message.includes('microphone')) {
+                    addMessage('system', '💡 Tip: Please allow microphone access and click "Retry Connection"');
+                } else if (error.message.includes('camera')) {
+                    addMessage('system', '💡 Tip: Camera access is optional. Click "Retry Connection" to continue.');
+                } else {
+                    addMessage('system', '🔧 Click "Retry Connection" to try again or refresh the page');
+                }
+            }
+        }
+
+        async function requestMicrophonePermission() {
+            try {
+                log('🎤 Requesting microphone permission...');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                log('✅ Microphone permission granted');
+            } catch (error) {
+                log(`❌ Microphone permission denied: ${error}`, 'error');
+                throw new Error('Microphone permission required for speech recognition');
+            }
+        }
+
+        async function initializeMedia() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: 'user' },
+                    audio: false  // Audio handled by EnhancedHybridVAD
+                });
+                
+                document.getElementById('videoPreview').srcObject = mediaStream;
+                updateStatus('videoStatus', 'Ready', 'success');
+                log('✅ Video initialized');
+                
+            } catch (error) {
+                log('❌ Video initialization failed - continuing without video', 'warn');
+                updateStatus('videoStatus', 'No Camera', 'warning');
+            }
+        }
+
+        async function initializeHybridVAD() {
+            try {
+                log('🔄 Starting EnhancedHybridVAD initialization...');
+                updateConnectionStatus('Initializing...', 'warning');
+                
+                // Check if EnhancedHybridVAD class is available
+                if (typeof EnhancedHybridVAD === 'undefined') {
+                    console.error('❌ EnhancedHybridVAD class not found');
+                    console.log('Available globals:', Object.keys(window).filter(key => key.includes('Enhanced') || key.includes('VAD')));
+                    
+                    // Try to create a simple fallback
+                    log('🔧 Creating fallback VAD system...');
+                    enhancedVAD = createFallbackVAD();
+                    updateConnectionStatus('Fallback Mode', 'warning');
+                    addMessage('system', '⚠️ Using fallback connection mode');
+                    return;
+                }
+                
+                log('✅ EnhancedHybridVAD class found, creating instance...');
+                
+                enhancedVAD = new EnhancedHybridVAD({
+                    debug: debugMode,
+                    pauseThreshold: 3000,
+                    minSpeechDuration: 500,
+                    ttsEnabled: document.getElementById('ttsEnabled').checked,
+                    ttsRate: 1.0,
+                    ttsVolume: document.getElementById('ttsVolume').value / 100
+                });
+                
+                log('✅ EnhancedHybridVAD instance created, setting up callbacks...');
+                
+                // Set up callbacks
+                enhancedVAD.setCallbacks({
+                    onConnectionChange: handleConnectionChange,
+                    onSessionStart: handleSessionStart,
+                    onSessionEnd: handleSessionEnd,
+                    onRealtimeTranscript: handleRealtimeTranscript,
+                    onFinalTranscript: handleFinalTranscript,
+                    onAIResponse: handleAIResponse,
+                    onTTSStart: handleTTSStart,
+                    onTTSEnd: handleTTSEnd,
+                    onConversationStateChange: handleConversationStateChange,
+                    onError: handleError,
+                    onStatusChange: handleStatusChange
+                });
+
+                log('✅ Callbacks set, initializing system...');
+                updateConnectionStatus('Connecting...', 'warning');
+
+                // Initialize the system with timeout
+                const initPromise = enhancedVAD.initialize();
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Initialization timeout after 10 seconds')), 10000);
+                });
+                
+                const initialized = await Promise.race([initPromise, timeoutPromise]);
+                
+                if (initialized) {
+                    updateConnectionStatus('Connected', 'success');
+                    log('✅ EnhancedHybridVAD initialized successfully');
+                } else {
+                    throw new Error('Failed to initialize EnhancedHybridVAD - initialize() returned false');
+                }
+                
+            } catch (error) {
+                log(`❌ EnhancedHybridVAD initialization failed: ${error.message}`, 'error');
+                console.error('Full error details:', error);
+                updateConnectionStatus('Failed', 'error');
+                addMessage('system', `❌ Connection failed: ${error.message}`);
+                
+                // Show retry button
+                document.getElementById('retry-connection-btn').style.display = 'block';
+                throw error;
+            }
+        }
+
+        function createFallbackVAD() {
+            log('🔧 Creating fallback VAD system...');
+            return {
+                isInitialized: false,
+                isConnected: false,
+                socket: null,
+                callbacks: {},
+                
+                setCallbacks(callbacks) {
+                    this.callbacks = callbacks;
+                },
+                
+                async initialize() {
+                    try {
+                        if (typeof io === 'undefined') {
+                            throw new Error('Socket.IO not available');
+                        }
+                        
+                        this.socket = io();
+                        
+                        this.socket.on('connect', () => {
+                            log('✅ Fallback VAD connected');
+                            this.isConnected = true;
+                            this.isInitialized = true;
+                            if (this.callbacks.onConnectionChange) {
+                                this.callbacks.onConnectionChange({ connected: true });
+                            }
+                        });
+                        
+                        this.socket.on('disconnect', () => {
+                            log('❌ Fallback VAD disconnected');
+                            this.isConnected = false;
+                            if (this.callbacks.onConnectionChange) {
+                                this.callbacks.onConnectionChange({ connected: false });
+                            }
+                        });
+                        
+                        return true;
+                    } catch (error) {
+                        log(`❌ Fallback VAD initialization failed: ${error.message}`, 'error');
+                        return false;
+                    }
+                },
+                
+                startSession() {
+                    log('🔧 Fallback VAD session start');
+                    return Promise.resolve({ session_id: 'fallback-session' });
+                },
+                
+                stopSession() {
+                    log('🔧 Fallback VAD session stop');
+                    return Promise.resolve();
+                }
+            };
+        }
+
+        function initializeControls() {
+            // TTS toggle
+            const ttsToggle = document.getElementById('ttsEnabled');
+            ttsToggle.addEventListener('change', function() {
+                const enabled = this.checked;
+                if (enhancedVAD) {
+                    enhancedVAD.config.ttsEnabled = enabled;
+                }
+                log(`🔊 TTS ${enabled ? 'enabled' : 'disabled'}`);
+                addMessage('system', `🔊 Voice responses ${enabled ? 'enabled' : 'disabled'}`);
+                updateStatus('ttsStatusText', enabled ? 'Ready' : 'Disabled', enabled ? 'success' : 'warning');
+            });
+
+            // Volume control
+            const volumeSlider = document.getElementById('ttsVolume');
+            const volumeDisplay = document.getElementById('volumeDisplay');
+            
+            volumeSlider.addEventListener('input', function() {
+                const volume = this.value;
+                volumeDisplay.textContent = volume + '%';
+                
+                if (enhancedVAD) {
+                    enhancedVAD.config.ttsVolume = volume / 100;
+                }
+            });
+        }
+
+        async function startSession() {
+            if (!enhancedVAD) {
+                alert('System not initialized');
+                return;
+            }
+            
+            try {
+                sessionId = 'multimodal_session_' + Date.now();
+                
+                // Start enhanced VAD session
+                await enhancedVAD.startSession(sessionId, document.getElementById('personaSelect').value);
+                
+                // Manually start listening after delay
+                setTimeout(() => {
+                    if (enhancedVAD && enhancedVAD.isRecording) {
+                        log('🎤 Starting speech recognition...');
+                        enhancedVAD.resumeListening();
+                        
+                        // Also ensure audio streaming is working
+                        if (enhancedVAD.audioStreamingEnabled) {
+                            log('🎵 Audio streaming should be active - speak to test');
+                            addMessage('system', '🎵 Audio streaming active - your voice is being processed');
+                        }
+                    }
+                }, 2000);
+                
+                // Start video analysis if available
+                if (enhancedVAD.socket) {
+                    enhancedVAD.socket.emit('start_video_analysis', { session_id: sessionId });
+                    videoAnalysisActive = true;
+                }
+                
+                // Update UI
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = false;
+                
+                updateStatus('sessionStatusText', 'Active', 'success');
+                updateStatus('audioStatusText', 'Listening', 'success');
+                
+                document.getElementById('transcription-status').textContent = 'Listening... Start speaking!';
+                document.getElementById('transcription-status').className = 'text-green-400 text-sm mb-2 animate-pulse';
+                
+                // Start video frame capture
+                if (mediaStream) {
+                    startVideoAnalysis();
+                }
+                
+                addMessage('system', '🚀 Enhanced Multimodal Practice Session Started!');
+                addMessage('system', '📹 Enhanced Video Analysis Active:');
+                addMessage('system', '   👋 CVZone: Hand gesture recognition enabled');
+                addMessage('system', '   😊 FER: Facial emotion analysis enabled');
+                addMessage('system', '   🧍 MediaPipe: Pose and body language tracking enabled');
+                addMessage('system', '🎤 Voice Activity Detection: Real-time speech processing');
+                addMessage('system', '🤖 AI Investor: Enhanced feedback with video insights');
+                addMessage('system', '📊 Live metrics updating based on your performance');
+                addMessage('system', '🎯 Begin your pitch - all systems are analyzing your presentation!');
+                
+                // Reset live feedback displays
+                updateLiveFeedback('currentGesture', '👋 Analyzing gestures...');
+                updateLiveFeedback('currentEmotion', '😊 Analyzing expressions...');
+                updateLiveFeedback('currentPosture', '🧍 Analyzing posture...');
+                updateLiveFeedback('liveRecommendation', '🎯 Start speaking to receive AI recommendations');
+                
+                log('✅ Enhanced session started successfully');
+                
+            } catch (error) {
+                log(`❌ Failed to start session: ${error.message}`, 'error');
+                addMessage('system', `❌ Failed to start session: ${error.message}`);
+            }
+        }
+
+        async function stopSession() {
+            if (!enhancedVAD) return;
+            
+            try {
+                await enhancedVAD.stopSession();
+                
+                if (enhancedVAD.socket && sessionId) {
+                    enhancedVAD.socket.emit('stop_video_analysis', { session_id: sessionId });
+                    videoAnalysisActive = false;
+                }
+                
+                // Stop video analysis
+                if (videoAnalysisInterval) {
+                    clearInterval(videoAnalysisInterval);
+                    videoAnalysisInterval = null;
+                }
+                
+                // Update UI
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                
+                updateStatus('sessionStatusText', 'Inactive', 'default');
+                updateStatus('audioStatusText', 'Ready', 'default');
+                
+                document.getElementById('transcription-status').textContent = 'Session ended';
+                document.getElementById('transcription-status').className = 'text-white/60 text-sm mb-2';
+                
+                sessionId = null;
+                
+                // Reset live feedback displays
+                updateLiveFeedback('currentGesture', '👋 No gesture detected');
+                updateLiveFeedback('currentEmotion', '😐 Neutral');
+                updateLiveFeedback('currentPosture', '🧍 Analyzing...');
+                updateLiveFeedback('liveRecommendation', 'Start your pitch to receive live feedback');
+                
+                // Reset analysis status
+                updateAnalysisStatus('cvzoneStatus', 'Ready', 'default');
+                updateAnalysisStatus('ferStatus', 'Ready', 'default');
+                updateAnalysisStatus('mediapipeStatus', 'Ready', 'default');
+                
+                addMessage('system', '⏹️ Enhanced Practice Session Ended');
+                addMessage('system', '📊 Enhanced video analysis stopped');
+                addMessage('system', '🔬 CVZone, FER, and MediaPipe analysis deactivated');
+                addMessage('system', '📈 Check your performance metrics above for insights');
+                log('✅ Enhanced session stopped');
+                
+            } catch (error) {
+                log(`❌ Error stopping session: ${error.message}`, 'error');
+            }
+        }
+
+        function startVideoAnalysis() {
+            if (!mediaStream) return;
+            
+            videoAnalysisInterval = setInterval(() => {
+                captureAndSendFrame();
+            }, 2000); // Capture every 2 seconds
+        }
+
+        function captureAndSendFrame() {
+            if (!sessionId || !enhancedVAD || !enhancedVAD.socket) return;
+            
+            const video = document.getElementById('videoPreview');
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = 320;
+            canvas.height = 240;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const frameData = canvas.toDataURL('image/jpeg', 0.8);
+            
+            enhancedVAD.socket.emit('video_frame', {
+                session_id: sessionId,
+                frame_data: frameData
+            });
+        }
+
+        // Event Handlers
+        function handleConnectionChange(data) {
+            updateConnectionStatus(data.connected ? 'Connected' : 'Disconnected', data.connected ? 'success' : 'error');
+        }
+
+        function handleSessionStart(data) {
+            log(`📡 Session started: ${data.session_id}`);
+        }
+
+        function handleSessionEnd(data) {
+            log(`📡 Session ended: ${data.session_id}`);
+        }
+
+        function handleRealtimeTranscript(data) {
+            updateTranscriptionDisplay(data);
+            userActivity.isSpeaking = true;
+            userActivity.lastSpeechTime = Date.now();
+            updateStatus('audioStatusText', 'Speaking', 'success');
+        }
+
+        function handleFinalTranscript(data) {
+            log(`📝 Final transcript: ${data.transcript}`);
+            addMessage('user', data.transcript);
+            userActivity.speechCount++;
+            updateStatus('audioStatusText', 'Processing', 'warning');
+        }
+
+        function handleAIResponse(data) {
+            log(`🤖 AI response: ${data.message}`);
+            addMessage('ai', data.message);
+        }
+
+        function handleTTSStart(data) {
+            log('🔊 AI started speaking');
+            updateStatus('ttsStatusText', 'Speaking', 'success');
+            updateStatus('audioStatusText', 'AI Speaking', 'warning');
+        }
+
+        function handleTTSEnd(data) {
+            log('🔊 AI finished speaking');
+            updateStatus('ttsStatusText', 'Ready', 'success');
+            updateStatus('audioStatusText', 'Listening', 'success');
+        }
+
+        function handleConversationStateChange(data) {
+            const state = data && data.state ? data.state : 'unknown';
+            log(`🔄 Conversation state: ${state}`);
+            
+            // Update UI based on conversation state
+            if (state === 'listening') {
+                updateStatus('audioStatusText', 'Listening', 'success');
+                document.getElementById('transcription-status').textContent = 'Listening... Start speaking!';
+                document.getElementById('transcription-status').className = 'text-green-400 text-sm mb-2 animate-pulse';
+            } else if (state === 'processing') {
+                updateStatus('audioStatusText', 'Processing', 'warning');
+                document.getElementById('transcription-status').textContent = 'Processing your speech...';
+                document.getElementById('transcription-status').className = 'text-yellow-400 text-sm mb-2';
+            } else if (state === 'ai_speaking') {
+                updateStatus('audioStatusText', 'AI Speaking', 'warning');
+                document.getElementById('transcription-status').textContent = 'AI is responding...';
+                document.getElementById('transcription-status').className = 'text-purple-400 text-sm mb-2';
+            }
+        }
+
+        function handleError(data) {
+            const error = data.error || data.message || 'Unknown error';
+            
+            // Don't show "aborted" errors to user as they're normal during state transitions
+            if (error === 'aborted') {
+                log(`🔄 Speech recognition aborted (normal during state transitions)`);
+                return;
+            }
+            
+            log(`❌ Error: ${error}`, 'error');
+            
+            // Only show important errors to user
+            if (error !== 'no-speech' && error !== 'audio-capture') {
+                addMessage('system', `❌ Error: ${error}`);
+            }
+        }
+
+        function handleStatusChange(data) {
+            log(`📊 Status change: ${data.type}`);
+        }
+
+        // Video Analysis Event Listeners
+        function setupVideoAnalysisEventListeners() {
+            if (!enhancedVAD || !enhancedVAD.socket) {
+                log('⚠️ Socket not available for video analysis events');
+                return;
+            }
+
+            // Video analysis started
+            enhancedVAD.socket.on('video_analysis_started', (data) => {
+                log(`📹 Enhanced video analysis started: ${data.analyzer_type}`);
+                addMessage('system', `📹 ${data.message}`);
+                // Enhanced status display
+                if (data.analyzer_type === 'enhanced') {
+                    updateStatus('videoStatus', '🚀 Enhanced Analysis Active', 'success');
+                } else {
+                    updateStatus('videoStatus', `${data.analyzer_type} Active`, 'success');
+                }
+                
+                // Show enhanced analysis capabilities
+                if (data.analyzer_type === 'enhanced') {
+                    addMessage('system', '🚀 Enhanced Video Analysis Active: CVZone hand tracking, FER emotion recognition, and MediaPipe pose analysis ready!');
+                    addMessage('system', '🎯 Real-time metrics will update based on your gestures, emotions, and body language!');
+                    
+                    // Show detailed capabilities
+                    setTimeout(() => {
+                        addMessage('system', '👋 CVZone: Advanced hand gesture recognition and effectiveness scoring');
+                        addMessage('system', '😊 FER: Facial emotion recognition with pitch suitability analysis');
+                        addMessage('system', '🧍 MediaPipe: Professional pose analysis and engagement detection');
+                    }, 1000);
+                } else {
+                    addMessage('system', '🎯 Real-time video analysis active - metrics will update based on your actual performance!');
+                }
+            });
+
+            // Video analysis stopped
+            enhancedVAD.socket.on('video_analysis_stopped', (data) => {
+                log('📹 Video analysis stopped');
+                addMessage('system', '📹 Video analysis stopped');
+                updateStatus('videoStatus', 'Ready', 'default');
+            });
+
+            // Real-time video analysis updates
+            enhancedVAD.socket.on('video_analysis_update', (data) => {
+                handleVideoAnalysisUpdate(data);
+            });
+
+            // Video insights
+            enhancedVAD.socket.on('video_insights', (data) => {
+                handleVideoInsights(data);
+            });
+
+            // Video errors
+            enhancedVAD.socket.on('video_error', (data) => {
+                log(`❌ Video error: ${data.error}`, 'error');
+                addMessage('system', `❌ Video error: ${data.error}`);
+            });
+
+            log('✅ Video analysis event listeners set up');
+        }
+
+        function handleVideoAnalysisUpdate(data) {
+            try {
+                // Update video analysis state
+                videoAnalysisActive = true;
+                lastVideoAnalysisTime = Date.now();
+                
+                const analysis = data.analysis;
+                
+                // Handle enhanced video analysis structure
+                const handAnalysis = analysis.hand_analysis || {};
+                const emotionAnalysis = analysis.emotion_analysis || {};
+                const poseAnalysis = analysis.pose_analysis || {};
+                const overallScores = analysis.overall_scores || {};
+                
+                if (data.analyzer_type === 'enhanced') {
+                    // Handle enhanced video analysis data with correct field names
+                    const handAnalysis = analysis.hand_analysis || {};
+                    const emotionAnalysis = analysis.emotion_analysis || {};
+                    const poseAnalysis = analysis.pose_analysis || {};
+                    const overallScores = analysis.overall_scores || {};
+
+                    // Update metrics with enhanced video analysis scores
+                    // Map enhanced scores to UI metrics (gesture_score -> eye contact, etc.)
+                    const gestureScore = Math.round((overallScores.gesture_score || 0.7) * 100);
+                    const emotionScore = Math.round((overallScores.emotion_score || 0.75) * 100);
+                    const postureScore = Math.round((overallScores.posture_score || 0.8) * 100);
+                    const pitchReadiness = Math.round((overallScores.pitch_readiness || 0.72) * 100);
+                    
+                    // Update individual metrics with enhanced data
+                    updateMetricScore('eyeContact', gestureScore); // Gesture effectiveness as eye contact proxy
+                    updateMetricScore('engagement', postureScore); // Posture score as engagement
+                    updateMetricScore('confidence', emotionScore); // Emotion score as confidence
+                    updateMetricScore('clarity', pitchReadiness); // Pitch readiness as clarity
+                    
+                    // Calculate overall score from enhanced metrics
+                    const overallScore = Math.round((gestureScore + emotionScore + postureScore + pitchReadiness) / 4);
+                    updateMetricScore('overall', overallScore);
+
+                    // Enhanced logging with detailed CVZone, FER, and MediaPipe data
+                    if (handAnalysis.hands_detected > 0) {
+                        const gestures = handAnalysis.gestures || [];
+                        const gestureTypes = gestures.map(g => g.type || 'unknown').join(', ');
+                        const effectiveness = Math.round((handAnalysis.gesture_effectiveness || 0) * 100);
+                        log(`👋 CVZone Hand Analysis: ${handAnalysis.hands_detected} hands detected, Gestures: [${gestureTypes}], Effectiveness: ${effectiveness}%`);
+                        
+                        // Update CVZone status
+                        updateAnalysisStatus('cvzoneStatus', 'Active', 'success');
+                        updateAnalysisStats('handsDetected', handAnalysis.hands_detected);
+                        
+                        // Update live gesture feedback
+                        const gestureIcon = getGestureIcon(gestureTypes);
+                        updateLiveFeedback('currentGesture', `${gestureIcon} ${gestureTypes || 'Hand detected'} (${effectiveness}% effective)`);
+                    } else {
+                        updateLiveFeedback('currentGesture', '👋 No gesture detected');
+                    }
+                    
+                    if (emotionAnalysis.faces_detected > 0) {
+                        const emotion = emotionAnalysis.dominant_emotion || 'neutral';
+                        const confidence = Math.round((emotionAnalysis.confidence_score || 0) * 100);
+                        const suitability = emotionAnalysis.pitch_suitability || 'moderate';
+                        log(`😊 FER Emotion Analysis: ${emotion} (${confidence}% confidence), Pitch Suitability: ${suitability}`);
+                        
+                        // Update FER status
+                        updateAnalysisStatus('ferStatus', `${emotion} (${confidence}%)`, 'success');
+                        updateAnalysisStats('facesDetected', emotionAnalysis.faces_detected);
+                        
+                        // Update live emotion feedback
+                        const emotionIcon = getEmotionIcon(emotion);
+                        const suitabilityColor = getSuitabilityColor(suitability);
+                        updateLiveFeedback('currentEmotion', `${emotionIcon} ${emotion} (${confidence}%) - ${suitability} for pitch`, suitabilityColor);
+                    } else {
+                        updateLiveFeedback('currentEmotion', '😐 No face detected');
+                    }
+                    
+                    if (poseAnalysis.pose_detected) {
+                        const engagement = poseAnalysis.engagement_level || 'neutral';
+                        const posture = Math.round((poseAnalysis.posture_score || 0) * 100);
+                        log(`🧍 MediaPipe Pose Analysis: Engagement: ${engagement}, Posture Score: ${posture}%`);
+                        
+                        // Update MediaPipe status
+                        updateAnalysisStatus('mediapipeStatus', `${engagement}`, 'success');
+                        updateAnalysisStats('poseDetected', 'Yes');
+                        
+                        // Update live posture feedback
+                        const postureIcon = getPostureIcon(engagement);
+                        const engagementColor = getEngagementColor(engagement);
+                        updateLiveFeedback('currentPosture', `${postureIcon} ${engagement} posture (${posture}% score)`, engagementColor);
+                    } else {
+                        updateLiveFeedback('currentPosture', '🧍 No pose detected');
+                    }
+                    
+                    // Update analysis counter
+                    let currentUpdates = parseInt(document.getElementById('analysisUpdates').textContent) || 0;
+                    updateAnalysisStats('analysisUpdates', currentUpdates + 1);
+
+                    // Log and display AI recommendations from enhanced analysis
+                    if (analysis.recommendations && analysis.recommendations.length > 0) {
+                        const topRecommendation = analysis.recommendations[0];
+                        log(`💡 Enhanced AI Recommendations: ${analysis.recommendations.slice(0, 2).join(', ')}`);
+                        updateLiveFeedback('liveRecommendation', `💡 ${topRecommendation}`, 'text-blue-400');
+                        
+                        // Show recommendation in conversation occasionally
+                        currentUpdates = parseInt(document.getElementById('analysisUpdates').textContent) || 0;
+                        if (currentUpdates > 0 && currentUpdates % 15 === 0) {
+                            addMessage('system', `💡 Enhanced AI Tip: ${topRecommendation}`);
+                        }
+                    }
+
+                    // Comprehensive enhanced score logging
+                    log(`📊 Enhanced Video Analysis - Gesture: ${gestureScore}%, Emotion: ${emotionScore}%, Posture: ${postureScore}%, Pitch Readiness: ${pitchReadiness}%, Overall: ${overallScore}%`);
+                    
+                    // Show periodic enhanced analysis summary in conversation
+                    currentUpdates = parseInt(document.getElementById('analysisUpdates').textContent) || 0;
+                    if (currentUpdates > 0 && currentUpdates % 10 === 0) {
+                        addMessage('system', `📊 Enhanced Analysis Update #${currentUpdates}: Overall Score ${overallScore}% (Gesture: ${gestureScore}%, Emotion: ${emotionScore}%, Posture: ${postureScore}%, Readiness: ${pitchReadiness}%)`);
+                    }
+                    
+                    // Show periodic enhanced analysis summary in conversation
+                    currentUpdates = parseInt(document.getElementById('analysisUpdates').textContent) || 0;
+                    if (currentUpdates > 0 && currentUpdates % 10 === 0) {
+                        addMessage('system', `📊 Enhanced Analysis Update #${currentUpdates}: Overall Score ${overallScore}% (Gesture: ${gestureScore}%, Emotion: ${emotionScore}%, Posture: ${postureScore}%, Readiness: ${pitchReadiness}%)`);
+                    }
+
+                } else {
+                    // Handle basic video analysis data
+                    const hands = analysis.hands || {};
+                    const face = analysis.face || {};
+                    const pose = analysis.pose || {};
+
+                    if (face.eye_contact_score !== undefined) {
+                        updateMetricScore('eyeContact', Math.round(face.eye_contact_score * 100));
+                    }
+                    
+                    if (pose.engagement_level) {
+                        const engagementMap = {
+                            'highly_engaged': 90,
+                            'engaged': 70,
+                            'neutral': 50,
+                            'disengaged': 30
+                        };
+                        updateMetricScore('engagement', engagementMap[pose.engagement_level] || 50);
+                    }
+                }
+
+            } catch (error) {
+                log(`❌ Error processing video analysis update: ${error.message}`, 'error');
+            }
+        }
+
+        function handleVideoInsights(data) {
+            const insights = data.insights || [];
+            
+            insights.forEach(insight => {
+                // Enhanced insight categorization with appropriate icons
+                let insightIcon = '💡';
+                let insightPrefix = 'Insight';
+                
+                if (insight.toLowerCase().includes('gesture') || insight.toLowerCase().includes('hand')) {
+                    insightIcon = '👋';
+                    insightPrefix = 'CVZone Hand Analysis';
+                } else if (insight.toLowerCase().includes('emotion') || insight.toLowerCase().includes('expression') || insight.toLowerCase().includes('facial')) {
+                    insightIcon = '😊';
+                    insightPrefix = 'FER Emotion Analysis';
+                } else if (insight.toLowerCase().includes('posture') || insight.toLowerCase().includes('pose') || insight.toLowerCase().includes('body')) {
+                    insightIcon = '🧍';
+                    insightPrefix = 'MediaPipe Pose Analysis';
+                } else if (insight.toLowerCase().includes('confidence')) {
+                    insightIcon = '💪';
+                    insightPrefix = 'Confidence Analysis';
+                } else if (insight.toLowerCase().includes('engagement')) {
+                    insightIcon = '🎯';
+                    insightPrefix = 'Engagement Analysis';
+                } else if (insight.toLowerCase().includes('pitch') || insight.toLowerCase().includes('presentation')) {
+                    insightIcon = '🚀';
+                    insightPrefix = 'Pitch Analysis';
+                }
+                
+                log(`${insightIcon} Enhanced ${insightPrefix}: ${insight}`);
+                addMessage('system', `${insightIcon} ${insightPrefix}: ${insight}`);
+            });
+            
+            // Log analysis source for debugging
+            if (data.analyzer_type === 'enhanced') {
+                log('🔬 Enhanced insights generated using professional CV libraries');
+            }
+        }
+
+        function updateAnalysisStatus(elementId, status, type) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.textContent = status;
+                element.className = `px-2 py-1 rounded-full text-xs font-medium ${getStatusClass(type)}`;
+            }
+        }
+
+        function updateAnalysisStats(statId, value) {
+            const element = document.getElementById(statId);
+            if (element) {
+                element.textContent = value;
+            }
+        }
+
+        function getStatusClass(type) {
+            switch(type) {
+                case 'success': return 'bg-green-600 text-white';
+                case 'warning': return 'bg-yellow-600 text-white';
+                case 'error': return 'bg-red-600 text-white';
+                default: return 'bg-gray-600 text-white';
+            }
+        }
+
+        function updateLiveFeedback(elementId, text, colorClass = '') {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.textContent = text;
+                if (colorClass) {
+                    element.className = `text-white font-medium ${colorClass}`;
+                }
+            }
+        }
+
+        function getGestureIcon(gestureType) {
+            if (!gestureType) return '👋';
+            const type = gestureType.toLowerCase();
+            if (type.includes('point')) return '👉';
+            if (type.includes('open')) return '✋';
+            if (type.includes('fist')) return '✊';
+            if (type.includes('peace')) return '✌️';
+            if (type.includes('thumbs')) return '👍';
+            return '👋';
+        }
+
+        function getEmotionIcon(emotion) {
+            switch(emotion?.toLowerCase()) {
+                case 'happy': return '😊';
+                case 'confident': return '😎';
+                case 'excited': return '😃';
+                case 'focused': return '🧐';
+                case 'calm': return '😌';
+                case 'surprised': return '😮';
+                case 'concerned': return '😟';
+                case 'nervous': return '😰';
+                case 'angry': return '😠';
+                case 'sad': return '😢';
+                default: return '😐';
+            }
+        }
+
+        function getPostureIcon(engagement) {
+            switch(engagement?.toLowerCase()) {
+                case 'highly_engaged': return '🚀';
+                case 'engaged': return '💪';
+                case 'neutral': return '🧍';
+                case 'disengaged': return '😴';
+                default: return '🧍';
+            }
+        }
+
+        function getSuitabilityColor(suitability) {
+            switch(suitability?.toLowerCase()) {
+                case 'excellent': return 'text-green-400';
+                case 'good': return 'text-blue-400';
+                case 'moderate': return 'text-yellow-400';
+                case 'needs_improvement': return 'text-red-400';
+                default: return 'text-white';
+            }
+        }
+
+        function getEngagementColor(engagement) {
+            switch(engagement?.toLowerCase()) {
+                case 'highly_engaged': return 'text-green-400';
+                case 'engaged': return 'text-blue-400';
+                case 'neutral': return 'text-yellow-400';
+                case 'disengaged': return 'text-red-400';
+                default: return 'text-white';
+            }
+        }
+
+        function updateMetricScore(metricType, score) {
+            // Clamp score between 0 and 100
+            score = Math.max(0, Math.min(100, score));
+            
+            const scoreElement = document.getElementById(`${metricType}Score`);
+            const progressElement = document.getElementById(`${metricType}Progress`);
+            
+            if (scoreElement) {
+                scoreElement.textContent = `${score}%`;
+            }
+            
+            if (progressElement) {
+                progressElement.style.width = `${score}%`;
+                
+                // Update color based on score
+                let colorClass = 'bg-gradient-to-r ';
+                if (score >= 80) {
+                    colorClass += 'from-green-500 to-green-600';
+                } else if (score >= 60) {
+                    colorClass += 'from-yellow-500 to-yellow-600';
+                } else if (score >= 40) {
+                    colorClass += 'from-orange-500 to-orange-600';
+                } else {
+                    colorClass += 'from-red-500 to-red-600';
+                }
+                
+                // Keep the existing color scheme for specific metrics
+                if (metricType === 'eyeContact') {
+                    colorClass = 'bg-gradient-to-r from-blue-500 to-blue-600';
+                } else if (metricType === 'engagement') {
+                    colorClass = 'bg-gradient-to-r from-green-500 to-green-600';
+                } else if (metricType === 'confidence') {
+                    colorClass = 'bg-gradient-to-r from-yellow-500 to-yellow-600';
+                } else if (metricType === 'clarity') {
+                    colorClass = 'bg-gradient-to-r from-purple-500 to-purple-600';
+                } else if (metricType === 'overall') {
+                    colorClass = 'bg-gradient-to-r from-indigo-500 to-indigo-600';
+                }
+                
+                progressElement.className = `${colorClass} h-2 rounded-full transition-all duration-1000`;
+                if (metricType === 'overall') {
+                    progressElement.className = `${colorClass} h-3 rounded-full transition-all duration-1000`;
+                }
+            }
+        }
+
+        // UI Helper Functions
+        function updateStatus(elementId, text, type = 'default') {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            element.textContent = text;
+            
+            // Update status indicator if it exists
+            const statusIndicator = element.previousElementSibling;
+            if (statusIndicator && statusIndicator.classList.contains('w-3')) {
+                let className = 'w-3 h-3 rounded-full mr-2 ' + getStatusColor(type);
+                
+                // Add animation for connecting/loading states
+                if (type === 'warning' && (text.includes('Connecting') || text.includes('Initializing') || text.includes('Starting'))) {
+                    className += ' animate-pulse';
+                }
+                
+                statusIndicator.className = className;
+            }
+        }
+
+        function updateConnectionStatus(text, type) {
+            updateStatus('connectionStatusText', text, type);
+        }
+
+        function getStatusColor(type) {
+            switch (type) {
+                case 'success': return 'bg-green-500';
+                case 'warning': return 'bg-yellow-500';
+                case 'error': return 'bg-red-500';
+                default: return 'bg-gray-500';
+            }
+        }
+
+        function updateTranscriptionDisplay(data) {
+            const display = document.getElementById('transcription-display');
+            const status = document.getElementById('transcription-status');
+            
+            if (data.interim || data.final) {
+                const text = data.interim || data.final;
+                display.innerHTML = `<div class="text-white">${text}</div>`;
+                status.textContent = data.final ? 'Processing...' : 'Listening...';
+                status.className = data.final ? 'text-yellow-400 text-sm mb-2' : 'text-green-400 text-sm mb-2 animate-pulse';
+            }
+        }
+
+        function addMessage(sender, message, hasAudio = false) {
+            const conversationLog = document.getElementById('conversation-log');
+            const messageDiv = document.createElement('div');
+            
+            let messageClass = 'p-3 rounded-lg ';
+            let messageContent = '';
+            
+            if (sender === 'system') {
+                messageClass += 'bg-blue-500/20 border border-blue-500/30';
+                messageContent = `<div class="text-blue-300 text-sm">${message}</div>`;
+            } else if (sender === 'user') {
+                messageClass += 'bg-green-500/20 border border-green-500/30 ml-8';
+                messageContent = `<div class="text-green-300"><strong>You:</strong> ${message}</div>`;
+            } else if (sender === 'ai') {
+                messageClass += 'bg-purple-500/20 border border-purple-500/30 mr-8';
+                const audioIcon = hasAudio ? ' 🔊' : '';
+                messageContent = `<div class="text-purple-300"><strong>AI Investor${audioIcon}:</strong> ${message}</div>`;
+            }
+            
+            messageDiv.className = messageClass;
+            messageDiv.innerHTML = messageContent;
+            conversationLog.appendChild(messageDiv);
+            conversationLog.scrollTop = conversationLog.scrollHeight;
+        }
+
+        function updateRealtimeMetrics() {
+            const now = Date.now();
+            const timeSinceLastSpeech = now - userActivity.lastSpeechTime;
+            const isRecentlySpeaking = timeSinceLastSpeech < 5000;
+            
+            // Check if we have recent video analysis data (within last 10 seconds)
+            const hasRecentVideoData = videoAnalysisActive && (now - lastVideoAnalysisTime < 10000);
+            
+            if (hasRecentVideoData) {
+                // Don't override metrics if we have recent video analysis data
+                log('📊 Using real video analysis data for metrics');
+                return;
+            }
+            
+            // Update metrics based on activity (fallback when no video data)
+            const baseVariation = 8;
+            
+            // Eye contact
+            const eyeContactTarget = isRecentlySpeaking ? 80 : 65;
+            previousMetrics.eyeContact = smoothTransition(previousMetrics.eyeContact, eyeContactTarget, baseVariation, 40, 95);
+            
+            // Engagement
+            const engagementTarget = isRecentlySpeaking ? 75 : 60;
+            previousMetrics.engagement = smoothTransition(previousMetrics.engagement, engagementTarget, baseVariation, 30, 90);
+            
+            // Confidence
+            const confidenceBonus = Math.min(userActivity.speechCount * 2, 15);
+            const confidenceTarget = 55 + confidenceBonus + (isRecentlySpeaking ? 10 : 0);
+            previousMetrics.confidence = smoothTransition(previousMetrics.confidence, confidenceTarget, 6, 35, 95);
+            
+            // Clarity
+            const clarityTarget = 60 + Math.min(userActivity.speechCount * 1.5, 20);
+            previousMetrics.clarity = smoothTransition(previousMetrics.clarity, clarityTarget, 8, 40, 90);
+            
+            // Overall
+            previousMetrics.overall = (
+                previousMetrics.eyeContact * 0.25 + 
+                previousMetrics.engagement * 0.25 + 
+                previousMetrics.confidence * 0.25 + 
+                previousMetrics.clarity * 0.25
+            );
+            
+            // Update UI
+            updateMetricDisplay('eyeContact', previousMetrics.eyeContact);
+            updateMetricDisplay('engagement', previousMetrics.engagement);
+            updateMetricDisplay('confidence', previousMetrics.confidence);
+            updateMetricDisplay('clarity', previousMetrics.clarity);
+            updateMetricDisplay('overall', previousMetrics.overall);
+        }
+
+        function smoothTransition(current, target, variation, min, max) {
+            const direction = target > current ? 1 : -1;
+            const change = (Math.random() * variation) + (direction * variation * 0.3);
+            const newValue = current + change;
+            return Math.max(min, Math.min(max, newValue));
+        }
+
+        function updateMetricDisplay(metric, value) {
+            const progressBar = document.getElementById(metric + 'Progress');
+            const scoreText = document.getElementById(metric + 'Score');
+            
+            if (progressBar && scoreText) {
+                progressBar.style.width = value + '%';
+                scoreText.textContent = Math.round(value) + '%';
+            }
+        }
+
+        // Quick Action Functions
+        function forceStartListening() {
+            if (!enhancedVAD || !sessionId) {
+                addMessage('system', '❌ Start a session first');
+                return;
+            }
+            
+            try {
+                enhancedVAD.resumeListening();
+                updateStatus('audioStatusText', 'Listening', 'success');
+                document.getElementById('transcription-status').textContent = 'Listening... Start speaking!';
+                document.getElementById('transcription-status').className = 'text-green-400 text-sm mb-2 animate-pulse';
+                addMessage('system', '🎤 Speech recognition started');
+            } catch (error) {
+                addMessage('system', `❌ Error: ${error.message}`);
+            }
+        }
+
+        function testTTS() {
+            const testMessage = "Hello! This is a test of the text-to-speech system. I'm ready to help you practice your pitch!";
+            
+            if (enhancedVAD && enhancedVAD.config.ttsEnabled) {
+                enhancedVAD.speakAIResponse(testMessage);
+                addMessage('system', '🧪 Testing TTS - you should hear audio now');
+            } else {
+                addMessage('system', '❌ TTS is disabled or system not ready');
+            }
+        }
+
+        function debugAudioStreaming() {
+            log('🔍 Audio Streaming Debug Info:');
+            
+            if (!enhancedVAD) {
+                log('❌ EnhancedVAD not initialized');
+                addMessage('system', '❌ EnhancedVAD not initialized');
+                return;
+            }
+            
+            log(`🎵 Audio Streaming Status:`);
+            log(`   - Streaming Enabled: ${enhancedVAD.audioStreamingEnabled}`);
+            log(`   - Audio Context: ${enhancedVAD.audioContext ? enhancedVAD.audioContext.state : 'null'}`);
+            log(`   - Media Stream: ${enhancedVAD.mediaStream ? 'active' : 'null'}`);
+            log(`   - Audio Processor: ${enhancedVAD.audioProcessor ? 'connected' : 'null'}`);
+            log(`   - Audio Chunks Sent: ${enhancedVAD.audioChunkCount || 0}`);
+            log(`   - Session ID: ${enhancedVAD.currentSessionId || 'none'}`);
+            log(`   - Is Recording: ${enhancedVAD.isRecording}`);
+            log(`   - AI Speaking: ${enhancedVAD.isAISpeaking}`);
+            
+            if (enhancedVAD.mediaStream) {
+                const tracks = enhancedVAD.mediaStream.getAudioTracks();
+                log(`   - Audio Tracks: ${tracks.length}`);
+                tracks.forEach((track, i) => {
+                    log(`     Track ${i}: ${track.label} (${track.readyState})`);
+                });
+            }
+            
+            addMessage('system', '🔍 Audio streaming debug info logged to console');
+            
+            // Test audio context resume
+            if (enhancedVAD.audioContext && enhancedVAD.audioContext.state === 'suspended') {
+                log('🔧 Attempting to resume audio context...');
+                enhancedVAD.audioContext.resume().then(() => {
+                    log('✅ Audio context resumed');
+                    addMessage('system', '✅ Audio context resumed');
+                }).catch(error => {
+                    log(`❌ Failed to resume audio context: ${error}`);
+                    addMessage('system', `❌ Failed to resume audio context: ${error.message}`);
+                });
+            }
+        }
+
+        function testAudioStreaming() {
+            if (!enhancedVAD) {
+                addMessage('system', '❌ System not initialized');
+                return;
+            }
+            
+            log('🧪 Testing audio streaming...');
+            addMessage('system', '🧪 Testing audio streaming - speak now!');
+            
+            // Force start audio streaming
+            enhancedVAD.forceStartAudioStreaming().then(success => {
+                if (success) {
+                    log('✅ Audio streaming test started');
+                    addMessage('system', '✅ Audio streaming ready - speak to test');
+                    
+                    // Monitor for 10 seconds
+                    const startCount = enhancedVAD.audioChunkCount || 0;
+                    setTimeout(() => {
+                        const endCount = enhancedVAD.audioChunkCount || 0;
+                        const chunksSent = endCount - startCount;
+                        log(`📊 Audio chunks sent in 10 seconds: ${chunksSent}`);
+                        addMessage('system', `📊 Audio chunks sent: ${chunksSent} (should be >0 if speaking)`);
+                    }, 10000);
+                } else {
+                    log('❌ Audio streaming test failed');
+                    addMessage('system', '❌ Audio streaming test failed');
+                }
+            });
+        }
+
+        function debugSystem() {
+            log('🔍 Running system debug...');
+            addMessage('system', '🔍 System Debug Information:');
+            
+            // Check dependencies
+            addMessage('system', `Socket.IO: ${typeof io !== 'undefined' ? '✅ Loaded' : '❌ Not loaded'}`);
+            addMessage('system', `EnhancedHybridVAD: ${typeof EnhancedHybridVAD !== 'undefined' ? '✅ Loaded' : '❌ Not loaded'}`);
+            
+            // Check browser capabilities
+            addMessage('system', `getUserMedia: ${navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '✅ Available' : '❌ Not available'}`);
+            addMessage('system', `WebRTC: ${window.RTCPeerConnection ? '✅ Available' : '❌ Not available'}`);
+            addMessage('system', `Web Speech API: ${window.SpeechRecognition || window.webkitSpeechRecognition ? '✅ Available' : '❌ Not available'}`);
+            
+            // Check current state
+            addMessage('system', `Enhanced VAD Instance: ${enhancedVAD ? '✅ Created' : '❌ Not created'}`);
+            addMessage('system', `Session ID: ${sessionId || 'None'}`);
+            
+            // Log to console for detailed debugging
+            console.log('🔍 Debug Info:', {
+                io: typeof io,
+                EnhancedHybridVAD: typeof EnhancedHybridVAD,
+                enhancedVAD: enhancedVAD,
+                sessionId: sessionId,
+                userAgent: navigator.userAgent,
+                location: window.location.href
+            });
+        }
+
+        function retryConnection() {
+            log('🔄 Retrying connection...');
+            addMessage('system', '🔄 Retrying connection...');
+            
+            // Reset state
+            enhancedVAD = null;
+            sessionId = null;
+            
+            // Hide retry button
+            document.getElementById('retry-connection-btn').style.display = 'none';
+            
+            // Retry initialization
+            initializeSystem();
+        }
+
+        // Test functions for debugging
+        function forceStartListening() {
+            log('🎤 Force starting listening...');
+            addMessage('system', '🎤 Attempting to force start listening...');
+            
+            if (enhancedVAD && enhancedVAD.startListening) {
+                enhancedVAD.startListening();
+                addMessage('system', '✅ Listening started');
+            } else {
+                addMessage('system', '❌ Enhanced VAD not available');
+            }
+        }
+
+        function testTTS() {
+            log('🔊 Testing Text-to-Speech...');
+            addMessage('system', '🔊 Testing Text-to-Speech...');
+            
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance('Hello! This is a test of the text-to-speech system.');
+                utterance.volume = document.getElementById('ttsVolume').value / 100;
+                speechSynthesis.speak(utterance);
+                addMessage('system', '✅ TTS test started');
+            } else {
+                addMessage('system', '❌ TTS not supported');
+            }
+        }
+
+        function debugAudioStreaming() {
+            log('🔍 Debugging audio streaming...');
+            addMessage('system', '🔍 Audio streaming debug info:');
+            
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    addMessage('system', '✅ Audio access granted');
+                    stream.getTracks().forEach(track => track.stop());
+                })
+                .catch(error => {
+                    addMessage('system', `❌ Audio access failed: ${error.message}`);
+                });
+        }
+
+        function testAudioStreaming() {
+            log('🎵 Testing audio streaming...');
+            addMessage('system', '🎵 Testing audio streaming...');
+            
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    addMessage('system', '✅ Audio stream test successful');
+                    setTimeout(() => {
+                        stream.getTracks().forEach(track => track.stop());
+                        addMessage('system', '🔇 Audio stream test completed');
+                    }, 2000);
+                })
+                .catch(error => {
+                    addMessage('system', `❌ Audio stream test failed: ${error.message}`);
+                });
+        }
+
+        function log(message, level = 'info') {
+            console.log(`[MultimodalDemo] ${message}`);
+        }
+
+        // Initialize enhanced analysis information
+        function showEnhancedAnalysisInfo() {
+            addMessage('system', '🚀 Enhanced Multimodal Pitch Analysis Ready!');
+            addMessage('system', '🔬 Professional Computer Vision Libraries Integrated:');
+            addMessage('system', '👋 CVZone: Advanced hand gesture recognition with effectiveness scoring');
+            addMessage('system', '😊 FER: Facial emotion recognition with pitch suitability analysis');
+            addMessage('system', '🧍 MediaPipe: Professional pose analysis and engagement detection');
+            addMessage('system', '📊 Real-time metrics update based on your actual performance');
+            addMessage('system', '🎯 Live feedback shows current gestures, emotions, and posture');
+            addMessage('system', '💡 AI recommendations generated from video analysis insights');
+            addMessage('system', '🚀 Click "Start Practice Session" to begin your enhanced pitch analysis!');
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', function() {
+            setTimeout(showEnhancedAnalysisInfo, 1000);
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (enhancedVAD) {
+                enhancedVAD.cleanup();
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>

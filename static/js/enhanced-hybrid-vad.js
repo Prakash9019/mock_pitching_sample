@@ -38,6 +38,11 @@ class EnhancedHybridVAD {
         this.speechSynthesis = null;    // New: TTS synthesis
         this.currentUtterance = null;   // New: Current TTS utterance
         
+        // Audio streaming for backend processing
+        this.audioStreamingEnabled = true;  // Enable audio streaming to backend
+        this.audioProcessor = null;
+        this.audioStreamInterval = null;
+        
         // Hybrid transcription state
         this.currentTranscript = '';
         this.finalTranscript = '';
@@ -48,6 +53,7 @@ class EnhancedHybridVAD {
         // Conversation flow state
         this.conversationState = 'idle'; // idle, listening, processing, ai_speaking
         this.pendingResume = false;
+        this.speechRecognitionRestarting = false; // Prevent rapid restarts
         
         // Callbacks
         this.callbacks = {
@@ -91,6 +97,11 @@ class EnhancedHybridVAD {
             
             // Initialize audio context for VAD
             await this.initializeAudioContext();
+            
+            // Initialize audio streaming for backend processing
+            if (this.audioStreamingEnabled) {
+                await this.initializeAudioStreaming();
+            }
             
             this.isInitialized = true;
             this.log('Enhanced hybrid VAD system initialized successfully');
@@ -327,9 +338,11 @@ class EnhancedHybridVAD {
         if (this.speechRecognition && this.isRecording) {
             this.log('Pausing speech recognition (AI speaking)');
             try {
-                this.speechRecognition.stop();
+                // Use abort instead of stop to immediately stop recognition
+                this.speechRecognition.abort();
             } catch (error) {
-                this.log(`Error stopping recognition: ${error.message}`, 'error');
+                // Ignore errors when aborting - this is expected
+                this.log(`Recognition abort: ${error.message}`, 'debug');
             }
         }
     }
@@ -338,7 +351,7 @@ class EnhancedHybridVAD {
      * Resume listening (after AI finishes speaking)
      */
     resumeListening() {
-        if (!this.isRecording || this.isAISpeaking) {
+        if (!this.isRecording || this.isAISpeaking || this.speechRecognitionRestarting) {
             return;
         }
         
@@ -349,24 +362,41 @@ class EnhancedHybridVAD {
         this.finalTranscript = '';
         this.currentTranscript = '';
         
-        // Restart speech recognition
+        // Stop any existing recognition first to prevent conflicts
         try {
             if (this.speechRecognition) {
-                this.speechRecognition.start();
+                this.speechRecognition.abort();
             }
         } catch (error) {
-            this.log(`Error restarting recognition: ${error.message}`, 'error');
-            // Try again after a short delay
-            setTimeout(() => {
-                try {
-                    if (this.speechRecognition && this.isRecording) {
-                        this.speechRecognition.start();
-                    }
-                } catch (retryError) {
-                    this.log(`Retry error: ${retryError.message}`, 'error');
-                }
-            }, 1000);
+            // Ignore abort errors
         }
+        
+        // Start speech recognition with delay to prevent rapid restarts
+        this.speechRecognitionRestarting = true;
+        setTimeout(() => {
+            try {
+                if (this.speechRecognition && this.isRecording && !this.isAISpeaking) {
+                    this.speechRecognition.start();
+                }
+            } catch (error) {
+                this.log(`Error starting recognition: ${error.message}`, 'error');
+                // Try again after a longer delay
+                setTimeout(() => {
+                    try {
+                        if (this.speechRecognition && this.isRecording && !this.isAISpeaking) {
+                            this.speechRecognition.start();
+                        }
+                    } catch (retryError) {
+                        this.log(`Retry error: ${retryError.message}`, 'error');
+                    }
+                }, 2000);
+            }
+            
+            // Reset restart flag
+            setTimeout(() => {
+                this.speechRecognitionRestarting = false;
+            }, 1000);
+        }, 300);
     }
     
     /**
@@ -399,6 +429,13 @@ class EnhancedHybridVAD {
         
         this.speechRecognition.onerror = (event) => {
             this.log(`Speech recognition error: ${event.error}`, 'error');
+            
+            // Handle specific error types
+            if (event.error === 'aborted') {
+                this.log('Speech recognition was aborted - this is normal during state transitions');
+                return; // Don't report aborted errors as they're expected
+            }
+            
             this.callbacks.onError?.({ type: 'speech_recognition', error: event.error });
         };
         
@@ -407,15 +444,21 @@ class EnhancedHybridVAD {
             
             // Only restart if we're still recording and AI is not speaking
             if (this.isRecording && !this.isAISpeaking) {
+                // Add longer delay to prevent rapid restarts
                 setTimeout(() => {
-                    if (this.isRecording && !this.isAISpeaking) {
+                    if (this.isRecording && !this.isAISpeaking && !this.speechRecognitionRestarting) {
+                        this.speechRecognitionRestarting = true;
                         try {
                             this.speechRecognition.start();
                         } catch (error) {
                             this.log(`Error restarting recognition: ${error.message}`, 'error');
                         }
+                        // Reset restart flag after a delay
+                        setTimeout(() => {
+                            this.speechRecognitionRestarting = false;
+                        }, 1000);
                     }
-                }, 100);
+                }, 500); // Increased delay from 100ms to 500ms
             }
         };
         
@@ -535,10 +578,150 @@ class EnhancedHybridVAD {
     async initializeAudioContext() {
         try {
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            this.log('Audio context initialized');
+            
+            // Resume audio context if suspended (required by browser policies)
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
+            
+            this.log(`Audio context initialized (state: ${this.audioContext.state})`);
         } catch (error) {
             this.log(`Audio context initialization failed: ${error.message}`, 'error');
         }
+    }
+    
+    /**
+     * Initialize audio streaming for backend processing
+     */
+    async initializeAudioStreaming() {
+        try {
+            // Get microphone access for audio streaming
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    sampleRate: 16000,
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true
+                } 
+            });
+            
+            // Create audio processor for streaming
+            if (this.audioContext) {
+                const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                
+                this.audioProcessor.onaudioprocess = (event) => {
+                    if (this.isRecording && !this.isAISpeaking && this.currentSessionId) {
+                        this.sendAudioChunk(event.inputBuffer);
+                    } else {
+                        // Debug why audio chunks aren't being sent
+                        if (!this.audioProcessDebugCount) this.audioProcessDebugCount = 0;
+                        this.audioProcessDebugCount++;
+                        if (this.audioProcessDebugCount % 100 === 0) {
+                            this.log(`🎤 Audio processing: recording=${this.isRecording}, aiSpeaking=${this.isAISpeaking}, session=${!!this.currentSessionId}`, 'debug');
+                        }
+                    }
+                };
+                
+                source.connect(this.audioProcessor);
+                // Don't connect to destination to avoid feedback - we just need the processing
+                // this.audioProcessor.connect(this.audioContext.destination);
+            }
+            
+            this.log('Audio streaming initialized');
+        } catch (error) {
+            this.log(`Audio streaming initialization failed: ${error.message}`, 'error');
+            this.audioStreamingEnabled = false;
+        }
+    }
+    
+    /**
+     * Force start audio streaming (for debugging)
+     */
+    async forceStartAudioStreaming() {
+        if (!this.audioStreamingEnabled) {
+            this.log('Audio streaming is disabled');
+            return false;
+        }
+        
+        try {
+            // Ensure audio context is running
+            if (this.audioContext && this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+                this.log('Audio context resumed for streaming');
+            }
+            
+            // Check if we have all components
+            if (!this.mediaStream) {
+                this.log('No media stream for audio streaming');
+                return false;
+            }
+            
+            if (!this.audioProcessor) {
+                this.log('No audio processor - reinitializing...');
+                await this.initializeAudioStreaming();
+            }
+            
+            this.log('✅ Audio streaming is ready');
+            return true;
+            
+        } catch (error) {
+            this.log(`Failed to start audio streaming: ${error.message}`, 'error');
+            return false;
+        }
+    }
+    
+    /**
+     * Send audio chunk to backend
+     */
+    sendAudioChunk(audioBuffer) {
+        if (!this.socket || !this.currentSessionId) {
+            this.log('Cannot send audio chunk: no socket or session', 'debug');
+            return;
+        }
+        
+        try {
+            // Convert audio buffer to base64
+            const audioData = this.audioBufferToBase64(audioBuffer);
+            
+            // Send to backend
+            this.socket.emit('audio_stream', {
+                session_id: this.currentSessionId,
+                audio_data: audioData
+            });
+            
+            // Log every 50th chunk to avoid spam
+            if (!this.audioChunkCount) this.audioChunkCount = 0;
+            this.audioChunkCount++;
+            if (this.audioChunkCount % 50 === 0) {
+                this.log(`📡 Sent ${this.audioChunkCount} audio chunks`);
+            }
+            
+        } catch (error) {
+            this.log(`Error sending audio chunk: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * Convert audio buffer to base64
+     */
+    audioBufferToBase64(audioBuffer) {
+        const channelData = audioBuffer.getChannelData(0);
+        const samples = new Int16Array(channelData.length);
+        
+        // Convert float32 to int16
+        for (let i = 0; i < channelData.length; i++) {
+            samples[i] = Math.max(-32768, Math.min(32767, channelData[i] * 32768));
+        }
+        
+        // Convert to base64
+        const bytes = new Uint8Array(samples.buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        
+        return btoa(binary);
     }
     
     /**
@@ -547,6 +730,24 @@ class EnhancedHybridVAD {
     async startSession(sessionId, persona = 'friendly') {
         if (!this.isInitialized || !this.isConnected) {
             throw new Error('System not initialized or not connected');
+        }
+        
+        // Ensure audio context is resumed and audio streaming is ready
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            try {
+                await this.audioContext.resume();
+                this.log('Audio context resumed for session');
+            } catch (error) {
+                this.log(`Failed to resume audio context: ${error.message}`, 'error');
+            }
+        }
+        
+        // Force start audio streaming
+        if (this.audioStreamingEnabled) {
+            const streamingReady = await this.forceStartAudioStreaming();
+            if (!streamingReady) {
+                this.log('⚠️ Audio streaming not ready - continuing without backend audio processing');
+            }
         }
         
         this.currentSessionId = sessionId;
@@ -681,6 +882,19 @@ class EnhancedHybridVAD {
         // Stop any active session first
         if (this.currentSessionId) {
             await this.stopSession();
+        }
+        
+        // Cleanup audio streaming
+        if (this.audioProcessor) {
+            this.audioProcessor.disconnect();
+            this.audioProcessor = null;
+            this.log('Audio processor disconnected');
+        }
+        
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream = null;
+            this.log('Media stream stopped');
         }
         
         // Disconnect socket
