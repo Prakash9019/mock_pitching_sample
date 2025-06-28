@@ -97,6 +97,10 @@
                                 class="w-full bg-purple-500 hover:bg-purple-600 text-white font-semibold py-2 px-4 rounded-xl transition-all duration-200 text-sm">
                             🔍 Debug System
                         </button>
+                        <button onclick="debugVideoAnalysis()" 
+                                class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-xl transition-all duration-200 text-sm">
+                            🎥 Debug Video Analysis
+                        </button>
                     </div>
                 </div>
 
@@ -861,22 +865,37 @@
         }
 
         function captureAndSendFrame() {
-            if (!sessionId || !enhancedVAD || !enhancedVAD.socket) return;
+            if (!sessionId || !enhancedVAD || !enhancedVAD.socket) {
+                log('⚠️ Cannot send frame: missing sessionId, enhancedVAD, or socket', 'warning');
+                return;
+            }
             
             const video = document.getElementById('videoPreview');
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+            if (!video || video.readyState < 2) {
+                log('⚠️ Video not ready for capture', 'warning');
+                return;
+            }
             
-            canvas.width = 320;
-            canvas.height = 240;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            const frameData = canvas.toDataURL('image/jpeg', 0.8);
-            
-            enhancedVAD.socket.emit('video_frame', {
-                session_id: sessionId,
-                frame_data: frameData
-            });
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                canvas.width = 320;
+                canvas.height = 240;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const frameData = canvas.toDataURL('image/jpeg', 0.8);
+                
+                enhancedVAD.socket.emit('video_frame', {
+                    session_id: sessionId,
+                    frame_data: frameData
+                });
+                
+                log(`📸 Frame sent: ${Math.round(frameData.length / 1024)}KB`, 'success');
+                
+            } catch (error) {
+                log(`❌ Error capturing frame: ${error.message}`, 'error');
+            }
         }
 
         // Event Handlers
@@ -974,7 +993,13 @@
             // Video analysis started
             enhancedVAD.socket.on('video_analysis_started', (data) => {
                 log(`📹 Enhanced video analysis started: ${data.analyzer_type}`);
+                log(`📊 Session ID: ${data.session_id}`);
                 addMessage('system', `📹 ${data.message}`);
+                
+                // Set video analysis as active
+                videoAnalysisActive = true;
+                lastVideoAnalysisTime = Date.now();
+                
                 // Enhanced status display
                 if (data.analyzer_type === 'enhanced') {
                     updateStatus('videoStatus', '🚀 Enhanced Analysis Active', 'success');
@@ -1026,9 +1051,18 @@
 
         function handleVideoAnalysisUpdate(data) {
             try {
+                log(`📊 Video analysis update received for session: ${data.session_id || 'unknown'}`);
+                
                 // Update video analysis state
                 videoAnalysisActive = true;
                 lastVideoAnalysisTime = Date.now();
+                
+                if (!analysis) {
+                    log('⚠️ No analysis data in video update', 'warning');
+                    return;
+                }
+                
+                log(`📈 Analysis data: hands=${analysis.hand_analysis?.hands_detected || 0}, emotion=${analysis.emotion_analysis?.dominant_emotion || 'none'}, pose=${analysis.pose_analysis?.pose_detected || false}`);
                 
                 const analysis = data.analysis;
                 
@@ -1604,15 +1638,49 @@
             addMessage('system', `Enhanced VAD Instance: ${enhancedVAD ? '✅ Created' : '❌ Not created'}`);
             addMessage('system', `Session ID: ${sessionId || 'None'}`);
             
+            // Video analysis specific debug
+            addMessage('system', `Video Analysis Active: ${videoAnalysisActive ? '✅ Active' : '❌ Inactive'}`);
+            addMessage('system', `Last Video Analysis: ${lastVideoAnalysisTime ? new Date(lastVideoAnalysisTime).toLocaleTimeString() : '❌ Never'}`);
+            addMessage('system', `Video Element Ready: ${document.getElementById('videoPreview')?.readyState >= 2 ? '✅ Ready' : '❌ Not ready'}`);
+            addMessage('system', `Video Analysis Interval: ${videoAnalysisInterval ? '✅ Running' : '❌ Not running'}`);
+            
             // Log to console for detailed debugging
             console.log('🔍 Debug Info:', {
                 io: typeof io,
                 EnhancedHybridVAD: typeof EnhancedHybridVAD,
                 enhancedVAD: enhancedVAD,
                 sessionId: sessionId,
+                videoAnalysisActive: videoAnalysisActive,
+                lastVideoAnalysisTime: lastVideoAnalysisTime,
+                mediaStream: mediaStream,
                 userAgent: navigator.userAgent,
                 location: window.location.href
             });
+        }
+        
+        // Add this function to test video analysis specifically
+        function debugVideoAnalysis() {
+            log('🎥 Debugging video analysis...');
+            addMessage('system', '🎥 Video Analysis Debug:');
+            
+            const video = document.getElementById('videoPreview');
+            addMessage('system', `Video Element: ${video ? '✅ Found' : '❌ Not found'}`);
+            addMessage('system', `Video Ready State: ${video ? video.readyState : 'N/A'} (need ≥2)`);
+            addMessage('system', `Video Dimensions: ${video ? `${video.videoWidth}x${video.videoHeight}` : 'N/A'}`);
+            addMessage('system', `Media Stream: ${mediaStream ? '✅ Active' : '❌ Not active'}`);
+            addMessage('system', `Video Analysis Active: ${videoAnalysisActive ? '✅ Active' : '❌ Inactive'}`);
+            
+            if (sessionId && enhancedVAD && enhancedVAD.socket) {
+                addMessage('system', '🧪 Testing frame capture...');
+                try {
+                    captureAndSendFrame();
+                    addMessage('system', '✅ Frame capture test completed - check server logs');
+                } catch (error) {
+                    addMessage('system', `❌ Frame capture test failed: ${error.message}`);
+                }
+            } else {
+                addMessage('system', '❌ Cannot test frame capture: missing session or socket');
+            }
         }
 
         function retryConnection() {

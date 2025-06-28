@@ -72,9 +72,26 @@ class VideoWebSocketHandler:
                 if self.enhanced_video_analyzer:
                     self.enhanced_video_analyzer.start_analysis(session_id)
                     analyzer_type = "enhanced"
+                    logger.info(f"Started enhanced video analysis for session {session_id}")
                 else:
                     self.video_analyzer.start_analysis(session_id)
                     analyzer_type = "basic"
+                    logger.info(f"Started basic video analysis for session {session_id}")
+                
+                # Initialize video analysis in workflow state
+                try:
+                    if self.pitch_workflow:
+                        config = {"configurable": {"thread_id": session_id}}
+                        current_state = self.pitch_workflow.workflow.get_state(config)
+                        
+                        if current_state.values:
+                            state_update = {"video_analysis_enabled": True}
+                            self.pitch_workflow.workflow.update_state(config, state_update)
+                            logger.info(f"Enabled video analysis in workflow state for session {session_id}")
+                        else:
+                            logger.warning(f"No workflow state found for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Error enabling video analysis in workflow: {e}")
                 
                 # Track video session
                 self.active_video_sessions[session_id] = {
@@ -151,9 +168,22 @@ class VideoWebSocketHandler:
                     logger.debug(f"Analyzing video frame with enhanced analyzer for session {session_id}")
                     analysis_result = self.enhanced_video_analyzer.analyze_frame(frame)
                     
-                    # Only log detailed results occasionally to avoid spam
-                    if analysis_result.get("status") != "throttled":
-                        logger.info(f"Enhanced video analysis completed for session {session_id}")
+                    # Log analysis results for debugging
+                    if analysis_result and analysis_result.get("status") != "throttled":
+                        logger.info(f"Enhanced video analysis completed for session {session_id}: {analysis_result.get('status', 'unknown')}")
+                        
+                        # Log specific analysis components
+                        if analysis_result.get('hand_analysis'):
+                            hands = analysis_result['hand_analysis'].get('hands_detected', 0)
+                            logger.info(f"  - Hands detected: {hands}")
+                        
+                        if analysis_result.get('emotion_analysis'):
+                            emotion = analysis_result['emotion_analysis'].get('dominant_emotion', 'none')
+                            logger.info(f"  - Dominant emotion: {emotion}")
+                        
+                        if analysis_result.get('pose_analysis'):
+                            pose = analysis_result['pose_analysis'].get('pose_detected', False)
+                            logger.info(f"  - Pose detected: {pose}")
                     
                 elif self.video_analyzer:
                     logger.debug(f"Analyzing video frame with basic analyzer for session {session_id}")

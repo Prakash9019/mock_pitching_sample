@@ -215,6 +215,13 @@ class PitchWorkflowAgent:
         state["question_answered"] = False
         state["follow_up_count"] = 0
         
+        # Initialize video analysis fields
+        state["video_analysis_enabled"] = False
+        state["video_insights"] = []
+        state["gesture_feedback"] = []
+        state["posture_feedback"] = []
+        state["expression_feedback"] = []
+        
         # Set persona if not provided
         if "persona" not in state:
             state["persona"] = "friendly"
