@@ -117,6 +117,7 @@ npm install lodash moment uuid
 | **`start_video_analysis`** 🆕 | `{session_id: string}` | **Start real-time video analysis** |
 | **`stop_video_analysis`** 🆕 | `{session_id: string}` | **Stop video analysis** |
 | **`video_frame`** 🆕 | `{session_id: string, frame_data: string}` | **Send video frame for analysis (base64 JPEG)** |
+| **`enable_video_analysis`** 🆕 | `{session_id: string, enabled: boolean}` | **Force enable/disable video analysis** |
 | `join_session` | `{session_id: string}` | Join existing session |
 | `leave_session` | `{session_id: string}` | Leave current session |
 
@@ -129,9 +130,10 @@ npm install lodash moment uuid
 | `session_ended` | `{session_id: string, reason: string, analytics?: object}` | Session termination |
 | **`video_analysis_started`** 🆕 | `{session_id: string, status: string, analyzer_type: string, message: string}` | **Video analysis activation confirmation** |
 | **`video_analysis_stopped`** 🆕 | `{session_id: string, message: string}` | **Video analysis deactivation** |
-| **`video_analysis_update`** 🆕 | `{session_id: string, analysis: object, analyzer_type: string}` | **Real-time video analysis results** |
+| **`video_analysis_update`** 🆕 | `{session_id: string, analysis: object, analyzer_type: string}` | **Real-time video analysis results with gesture, emotion, and pose data** |
 | **`video_insights`** 🆕 | `{session_id: string, insights: object, recommendations: array}` | **AI-generated video insights** |
 | **`video_error`** 🆕 | `{error: string, session_id?: string}` | **Video analysis errors** |
+| **`video_status`** 🆕 | `{session_id: string, status: string}` | **Video analysis status updates (enabled/disabled/analyzing)** |
 | `error` | `{message: string, type: string, code?: number}` | Error notifications |
 | `status_update` | `{session_id: string, status: string, stage?: string}` | Session status changes |
 | `typing_indicator` | `{session_id: string, is_typing: boolean}` | AI typing indicator |
@@ -506,6 +508,16 @@ The platform now includes **professional-grade video analysis** using state-of-t
 - **Professional Presence**: Overall body language assessment
 - **Movement Tracking**: Gesture coordination and natural movement
 
+#### 🔄 LangGraph Workflow Integration
+- **Real-time State Updates**: Video analysis data is integrated into the LangGraph workflow state
+- **Comprehensive Analysis**: Video insights are incorporated into the final pitch analysis
+- **Gesture Feedback**: Hand gesture effectiveness is tracked throughout the pitch
+- **Expression Tracking**: Emotional state is monitored during different pitch stages
+- **Posture Assessment**: Body language is evaluated for professional presence
+- **Stage-specific Analysis**: Video performance is analyzed for each pitch stage
+- **Explicit Activation**: Use `enable_video_analysis` event to ensure video data is included in analysis
+- **Reliable Integration**: Send frames consistently to maintain video analysis throughout the session
+
 ### Video Integration Service
 
 ```javascript
@@ -577,14 +589,25 @@ class VideoAnalysisService {
       this.socketService.socket.emit('start_video_analysis', {
         session_id: sessionId
       });
+      
+      // Explicitly enable video analysis in LangGraph workflow
+      this.socketService.socket.emit('enable_video_analysis', {
+        session_id: sessionId,
+        enabled: true
+      });
 
       // Start frame capture
       this.isAnalyzing = true;
       this.analysisInterval = setInterval(() => {
         this.captureAndSendFrame(sessionId);
       }, this.frameRate * 1000);
+      
+      // Send initial frame immediately to ensure analysis starts
+      setTimeout(() => {
+        this.captureAndSendFrame(sessionId);
+      }, 500);
 
-      console.log('🎥 Video analysis started');
+      console.log('🎥 Video analysis started with LangGraph integration');
       
     } catch (error) {
       console.error('❌ Failed to start video analysis:', error);
@@ -625,20 +648,32 @@ class VideoAnalysisService {
       // Create canvas for frame capture
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      // Use actual video dimensions or fallback to configured dimensions
+      canvas.width = this.videoElement.videoWidth || this.frameWidth;
+      canvas.height = this.videoElement.videoHeight || this.frameHeight;
       
-      canvas.width = this.frameWidth;
-      canvas.height = this.frameHeight;
+      // Ensure valid dimensions
+      if (canvas.width === 0 || canvas.height === 0) {
+        canvas.width = this.frameWidth;
+        canvas.height = this.frameHeight;
+      }
       
       // Draw video frame to canvas
       ctx.drawImage(this.videoElement, 0, 0, canvas.width, canvas.height);
       
-      // Convert to base64 JPEG
+      // Convert to base64 JPEG with quality setting
       const frameData = canvas.toDataURL('image/jpeg', this.frameQuality);
       
       // Send frame to server
       this.socketService.socket.emit('video_frame', {
         session_id: sessionId,
         frame_data: frameData
+      });
+      
+      // Force enable video analysis flag to ensure proper integration
+      this.socketService.socket.emit('enable_video_analysis', {
+        session_id: sessionId,
+        enabled: true
       });
       
     } catch (error) {
@@ -6542,6 +6577,19 @@ Low confidence scores or incorrect gesture detection
 4. Check camera resolution and quality
 5. Adjust frame capture rate (try 1-2 second intervals)
 6. Ensure stable internet connection for real-time processing
+
+**Problem:** Video analysis not appearing in final pitch analysis
+```
+"Video Analysis: Not available for this session" in pitch analysis report
+```
+
+**Solutions:**
+1. Explicitly enable video analysis with `enable_video_analysis` event
+2. Ensure video frames are being sent regularly during the session
+3. Check that video analysis data is being integrated into LangGraph workflow
+4. Verify that `video_analysis_enabled` flag is set to true in session state
+5. Monitor server logs for video analysis integration messages
+6. Try sending frames at a lower resolution (320x240) to ensure processing speed
 
 **Problem:** No audio transcription received
 ```

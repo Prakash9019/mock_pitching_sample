@@ -877,24 +877,53 @@
             }
             
             try {
+                // FIXED: Create a canvas with proper dimensions
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 
-                canvas.width = 320;
-                canvas.height = 240;
+                // FIXED: Use actual video dimensions or fallback to 320x240
+                canvas.width = video.videoWidth || 320;
+                canvas.height = video.videoHeight || 240;
+                
+                // FIXED: Ensure video has content before drawing
+                if (canvas.width === 0 || canvas.height === 0) {
+                    canvas.width = 320;
+                    canvas.height = 240;
+                }
+                
+                // Draw the video frame to canvas
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                const frameData = canvas.toDataURL('image/jpeg', 0.8);
+                // FIXED: Compress more aggressively to reduce network load
+                const frameData = canvas.toDataURL('image/jpeg', 0.7);
                 
-                enhancedVAD.socket.emit('video_frame', {
-                    session_id: sessionId,
-                    frame_data: frameData
-                });
-                
-                log(`📸 Frame sent: ${Math.round(frameData.length / 1024)}KB`, 'success');
+                // FIXED: Check if socket is connected before sending
+                if (enhancedVAD.socket.connected) {
+                    enhancedVAD.socket.emit('video_frame', {
+                        session_id: sessionId,
+                        frame_data: frameData
+                    });
+                    
+                    // Update UI with frame size
+                    const frameSizeKB = Math.round(frameData.length / 1024);
+                    log(`📸 Frame sent: ${frameSizeKB}KB`, 'success');
+                    
+                    // FIXED: Update video status indicator
+                    updateStatus('videoStatus', 'Analyzing', 'success');
+                    
+                    // FIXED: Force video_analysis_enabled flag to true
+                    enhancedVAD.socket.emit('enable_video_analysis', {
+                        session_id: sessionId,
+                        enabled: true
+                    });
+                } else {
+                    log('⚠️ Socket disconnected, cannot send frame', 'warning');
+                    updateStatus('videoStatus', 'Disconnected', 'error');
+                }
                 
             } catch (error) {
                 log(`❌ Error capturing frame: ${error.message}`, 'error');
+                updateStatus('videoStatus', 'Error', 'error');
             }
         }
 

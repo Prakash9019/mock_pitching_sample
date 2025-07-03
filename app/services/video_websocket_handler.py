@@ -219,6 +219,44 @@ class VideoWebSocketHandler:
                 }, room=sid)
         
         @self.sio.event
+        async def enable_video_analysis(sid, data):
+            """Explicitly enable video analysis for a session"""
+            try:
+                session_id = data.get('session_id')
+                enabled = data.get('enabled', True)
+                
+                if not session_id:
+                    await self.sio.emit('video_error', {
+                        'error': 'session_id required'
+                    }, room=sid)
+                    return
+                
+                # Force enable video analysis in workflow state
+                if self.pitch_workflow:
+                    config = {"configurable": {"thread_id": session_id}}
+                    try:
+                        current_state = self.pitch_workflow.workflow.get_state(config)
+                        if current_state.values:
+                            state_update = {"video_analysis_enabled": enabled}
+                            self.pitch_workflow.workflow.update_state(config, state_update)
+                            logger.info(f"Explicitly set video_analysis_enabled={enabled} for session {session_id}")
+                            
+                            await self.sio.emit('video_status', {
+                                'session_id': session_id,
+                                'status': 'video_analysis_enabled' if enabled else 'video_analysis_disabled'
+                            }, room=sid)
+                    except Exception as e:
+                        logger.error(f"Error enabling video analysis in workflow: {e}")
+                        await self.sio.emit('video_error', {
+                            'error': f'Failed to enable video analysis: {str(e)}'
+                        }, room=sid)
+            except Exception as e:
+                logger.error(f"Error in enable_video_analysis: {e}")
+                await self.sio.emit('video_error', {
+                    'error': f'Failed to process request: {str(e)}'
+                }, room=sid)
+        
+        @self.sio.event
         async def get_video_summary(sid, data):
             """Get video analysis summary for a session"""
             try:

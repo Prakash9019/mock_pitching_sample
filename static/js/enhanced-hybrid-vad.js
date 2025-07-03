@@ -12,7 +12,7 @@ class EnhancedHybridVAD {
     constructor(config = {}) {
         this.config = {
             sampleRate: 16000,
-            bufferSize: 4096,
+            bufferSize: 8192,           // FIXED: Increased buffer size
             socketUrl: window.location.origin,
             pauseThreshold: 2000,        // 2 seconds pause to send
             minSpeechDuration: 1000,     // Minimum 1 second of speech
@@ -21,7 +21,9 @@ class EnhancedHybridVAD {
             ttsRate: 1.0,                // Speech rate
             ttsPitch: 1.0,               // Speech pitch
             ttsVolume: 0.8,              // Speech volume
-            debug: false,
+            debug: true,                 // FIXED: Enable debug by default
+            reconnectAttempts: 5,        // FIXED: Socket reconnect attempts
+            audioThrottleMs: 100,        // FIXED: Throttle audio sending
             ...config
         };
         
@@ -30,18 +32,25 @@ class EnhancedHybridVAD {
         this.isConnected = false;
         this.currentSessionId = null;
         this.isRecording = false;
-        this.isAISpeaking = false;      // New: Track AI speaking state
+        this.isAISpeaking = false;      // Track AI speaking state
         this.audioContext = null;
         this.mediaStream = null;
         this.socket = null;
         this.speechRecognition = null;
-        this.speechSynthesis = null;    // New: TTS synthesis
-        this.currentUtterance = null;   // New: Current TTS utterance
+        this.speechSynthesis = null;    // TTS synthesis
+        this.currentUtterance = null;   // Current TTS utterance
+        
+        // FIXED: Error tracking
+        this.recognitionErrorCount = 0;
+        this.socketErrorCount = 0;
+        this.lastErrorTime = 0;
+        this.lastAudioSendTime = 0;     // For throttling audio sending
         
         // Audio streaming for backend processing
         this.audioStreamingEnabled = true;  // Enable audio streaming to backend
         this.audioProcessor = null;
         this.audioStreamInterval = null;
+        this.useAudioWorklet = false;   // FIXED: Track AudioWorklet usage
         
         // Hybrid transcription state
         this.currentTranscript = '';
@@ -55,6 +64,11 @@ class EnhancedHybridVAD {
         this.pendingResume = false;
         this.speechRecognitionRestarting = false; // Prevent rapid restarts
         
+        // FIXED: Connection management
+        this.connectionAttempts = 0;
+        this.maxConnectionAttempts = this.config.reconnectAttempts;
+        this.reconnectTimer = null;
+        
         // Callbacks
         this.callbacks = {
             onConnectionChange: null,
@@ -63,14 +77,14 @@ class EnhancedHybridVAD {
             onRealtimeTranscript: null,
             onFinalTranscript: null,
             onAIResponse: null,
-            onTTSStart: null,           // New: TTS started
-            onTTSEnd: null,             // New: TTS finished
-            onConversationStateChange: null, // New: State changes
+            onTTSStart: null,           // TTS started
+            onTTSEnd: null,             // TTS finished
+            onConversationStateChange: null, // State changes
             onError: null,
             onStatusChange: null
         };
         
-        this.log('Enhanced Hybrid VAD initialized');
+        this.log('Enhanced Hybrid VAD initialized with improved reliability');
     }
     
     log(message, level = 'info') {
@@ -166,31 +180,81 @@ class EnhancedHybridVAD {
                 return;
             }
             
+            // FIXED: Improved Socket.IO configuration for better reliability
             this.socket = io(this.config.socketUrl, {
                 transports: ['websocket', 'polling'],
-                timeout: 20000,
+                timeout: 30000, // Increased timeout
                 forceNew: true,
                 reconnection: true,
                 reconnectionDelay: 1000,
-                reconnectionAttempts: 5
+                reconnectionDelayMax: 5000, // Added max delay
+                reconnectionAttempts: 10, // Increased attempts
+                pingTimeout: 60000, // Increased ping timeout
+                pingInterval: 25000, // Increased ping interval
+                autoConnect: true
             });
+            
+            // FIXED: Track connection attempts
+            this.connectionAttempts = 0;
+            this.maxConnectionAttempts = 5;
             
             this.socket.on('connect', () => {
                 this.isConnected = true;
-                this.log('Socket.IO connected');
+                this.connectionAttempts = 0; // Reset counter on successful connection
+                this.log('Socket.IO connected successfully');
                 this.callbacks.onConnectionChange?.({ connected: true });
                 resolve();
             });
             
-            this.socket.on('disconnect', () => {
+            this.socket.on('disconnect', (reason) => {
                 this.isConnected = false;
-                this.log('Socket.IO disconnected');
-                this.callbacks.onConnectionChange?.({ connected: false });
+                this.log(`Socket.IO disconnected: ${reason}`);
+                this.callbacks.onConnectionChange?.({ connected: false, reason });
+                
+                // FIXED: Auto-reconnect for certain disconnect reasons
+                if (reason === 'io server disconnect' || reason === 'transport close') {
+                    this.connectionAttempts++;
+                    if (this.connectionAttempts < this.maxConnectionAttempts) {
+                        this.log(`Attempting to reconnect (${this.connectionAttempts}/${this.maxConnectionAttempts})...`);
+                        setTimeout(() => {
+                            this.socket.connect();
+                        }, 2000);
+                    }
+                }
             });
             
             this.socket.on('connect_error', (error) => {
                 this.log(`Connection error: ${error.message}`, 'error');
-                reject(error);
+                this.connectionAttempts++;
+                
+                if (this.connectionAttempts < this.maxConnectionAttempts) {
+                    this.log(`Retrying connection (${this.connectionAttempts}/${this.maxConnectionAttempts})...`);
+                    setTimeout(() => {
+                        this.socket.connect();
+                    }, 2000 * this.connectionAttempts); // Increasing backoff
+                } else {
+                    reject(error);
+                }
+            });
+            
+            // FIXED: Added reconnect events
+            this.socket.on('reconnect', (attemptNumber) => {
+                this.log(`Socket.IO reconnected after ${attemptNumber} attempts`);
+                this.isConnected = true;
+                this.callbacks.onConnectionChange?.({ connected: true, reconnected: true });
+            });
+            
+            this.socket.on('reconnect_attempt', (attemptNumber) => {
+                this.log(`Socket.IO reconnect attempt ${attemptNumber}`);
+            });
+            
+            this.socket.on('reconnect_error', (error) => {
+                this.log(`Socket.IO reconnect error: ${error.message}`, 'error');
+            });
+            
+            this.socket.on('reconnect_failed', () => {
+                this.log('Socket.IO reconnect failed after all attempts', 'error');
+                this.callbacks.onError?.({ type: 'socket', error: 'Reconnection failed' });
             });
             
             // Audio session events
@@ -225,6 +289,11 @@ class EnhancedHybridVAD {
             this.socket.on('audio_error', (data) => {
                 this.log(`Audio error: ${data.error}`, 'error');
                 this.callbacks.onError?.(data);
+            });
+            
+            // FIXED: Add ping/pong monitoring
+            this.socket.io.on("ping", () => {
+                this.log("Socket.IO ping received", "debug");
             });
         });
     }
@@ -410,10 +479,13 @@ class EnhancedHybridVAD {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         this.speechRecognition = new SpeechRecognition();
         
-        // Configure for hybrid mode
-        this.speechRecognition.continuous = true;
+        // Configure for hybrid mode - FIXED: Changed continuous to false to prevent network errors
+        this.speechRecognition.continuous = false;
         this.speechRecognition.interimResults = true;
         this.speechRecognition.lang = 'en-US';
+        
+        // FIXED: Add max alternatives for better recognition
+        this.speechRecognition.maxAlternatives = 3;
         
         this.speechRecognition.onstart = () => {
             this.log('Speech recognition started');
@@ -436,6 +508,25 @@ class EnhancedHybridVAD {
                 return; // Don't report aborted errors as they're expected
             }
             
+            // FIXED: Handle network errors more gracefully
+            if (event.error === 'network') {
+                this.log('Network error detected - will retry with fallback mode');
+                // Don't report network errors to UI, just retry
+                setTimeout(() => {
+                    if (this.isRecording && !this.isAISpeaking && !this.speechRecognitionRestarting) {
+                        this.tryRestartRecognition();
+                    }
+                }, 1000);
+                return;
+            }
+            
+            // FIXED: Handle no-speech errors more gracefully
+            if (event.error === 'no-speech') {
+                this.log('No speech detected - will retry');
+                // Don't report no-speech errors to UI, just retry
+                return;
+            }
+            
             this.callbacks.onError?.({ type: 'speech_recognition', error: event.error });
         };
         
@@ -444,25 +535,85 @@ class EnhancedHybridVAD {
             
             // Only restart if we're still recording and AI is not speaking
             if (this.isRecording && !this.isAISpeaking) {
-                // Add longer delay to prevent rapid restarts
+                // FIXED: Increased delay to prevent rapid restarts
                 setTimeout(() => {
                     if (this.isRecording && !this.isAISpeaking && !this.speechRecognitionRestarting) {
-                        this.speechRecognitionRestarting = true;
-                        try {
-                            this.speechRecognition.start();
-                        } catch (error) {
-                            this.log(`Error restarting recognition: ${error.message}`, 'error');
-                        }
-                        // Reset restart flag after a delay
-                        setTimeout(() => {
-                            this.speechRecognitionRestarting = false;
-                        }, 1000);
+                        this.tryRestartRecognition();
                     }
-                }, 500); // Increased delay from 100ms to 500ms
+                }, 800); // Increased delay from 500ms to 800ms
             }
         };
         
-        this.log('Speech recognition initialized with flow control');
+        this.log('Speech recognition initialized with improved flow control');
+    }
+    
+    /**
+     * FIXED: New helper method to restart recognition with error handling
+     */
+    tryRestartRecognition() {
+        if (this.speechRecognitionRestarting) {
+            return;
+        }
+        
+        this.speechRecognitionRestarting = true;
+        
+        try {
+            // Create a new instance to avoid potential issues with reusing the same instance
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            // Only create a new instance if we've had errors
+            if (this.recognitionErrorCount && this.recognitionErrorCount > 3) {
+                this.log('Creating fresh speech recognition instance after errors');
+                
+                // Save event handlers
+                const oldHandlers = {
+                    onstart: this.speechRecognition.onstart,
+                    onresult: this.speechRecognition.onresult,
+                    onerror: this.speechRecognition.onerror,
+                    onend: this.speechRecognition.onend
+                };
+                
+                // Create new instance
+                this.speechRecognition = new SpeechRecognition();
+                
+                // Configure
+                this.speechRecognition.continuous = false;
+                this.speechRecognition.interimResults = true;
+                this.speechRecognition.lang = 'en-US';
+                this.speechRecognition.maxAlternatives = 3;
+                
+                // Restore handlers
+                this.speechRecognition.onstart = oldHandlers.onstart;
+                this.speechRecognition.onresult = oldHandlers.onresult;
+                this.speechRecognition.onerror = oldHandlers.onerror;
+                this.speechRecognition.onend = oldHandlers.onend;
+                
+                // Reset error count
+                this.recognitionErrorCount = 0;
+            }
+            
+            // Start recognition
+            this.speechRecognition.start();
+        } catch (error) {
+            this.log(`Error restarting recognition: ${error.message}`, 'error');
+            
+            // Track errors
+            if (!this.recognitionErrorCount) this.recognitionErrorCount = 0;
+            this.recognitionErrorCount++;
+            
+            // Try again after a longer delay if we keep having errors
+            setTimeout(() => {
+                this.speechRecognitionRestarting = false;
+                if (this.isRecording && !this.isAISpeaking) {
+                    this.tryRestartRecognition();
+                }
+            }, 2000);
+        }
+        
+        // Reset restart flag after a delay
+        setTimeout(() => {
+            this.speechRecognitionRestarting = false;
+        }, 1000);
     }
     
     /**
@@ -595,40 +746,84 @@ class EnhancedHybridVAD {
      */
     async initializeAudioStreaming() {
         try {
-            // Get microphone access for audio streaming
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            // FIXED: More robust microphone access with fallback options
+            const constraints = {
                 audio: {
-                    sampleRate: 16000,
-                    channelCount: 1,
+                    sampleRate: { ideal: 16000 },
+                    channelCount: { ideal: 1 },
                     echoCancellation: true,
-                    noiseSuppression: true
-                } 
-            });
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            };
             
-            // Create audio processor for streaming
-            if (this.audioContext) {
-                const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-                this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+            try {
+                // Try with ideal settings first
+                this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                this.log('Got microphone access with ideal settings');
+            } catch (initialError) {
+                this.log(`Initial microphone access failed: ${initialError.message}. Trying fallback...`, 'warning');
                 
-                this.audioProcessor.onaudioprocess = (event) => {
-                    if (this.isRecording && !this.isAISpeaking && this.currentSessionId) {
-                        this.sendAudioChunk(event.inputBuffer);
-                    } else {
-                        // Debug why audio chunks aren't being sent
-                        if (!this.audioProcessDebugCount) this.audioProcessDebugCount = 0;
-                        this.audioProcessDebugCount++;
-                        if (this.audioProcessDebugCount % 100 === 0) {
-                            this.log(`🎤 Audio processing: recording=${this.isRecording}, aiSpeaking=${this.isAISpeaking}, session=${!!this.currentSessionId}`, 'debug');
-                        }
-                    }
-                };
-                
-                source.connect(this.audioProcessor);
-                // Don't connect to destination to avoid feedback - we just need the processing
-                // this.audioProcessor.connect(this.audioContext.destination);
+                // Fallback to simpler constraints
+                try {
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    this.log('Got microphone access with fallback settings');
+                } catch (fallbackError) {
+                    throw new Error(`Microphone access failed: ${fallbackError.message}`);
+                }
             }
             
-            this.log('Audio streaming initialized');
+            // FIXED: Use AudioWorkletNode if available (modern) or fallback to ScriptProcessor (legacy)
+            if (this.audioContext) {
+                const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                
+                // Check if AudioWorklet is supported
+                if (window.AudioWorkletNode && this.audioContext.audioWorklet) {
+                    try {
+                        // This is a more modern approach but requires more setup
+                        this.log('AudioWorklet is supported, but using ScriptProcessor for compatibility');
+                        this.useAudioWorklet = false;
+                    } catch (workletError) {
+                        this.log(`AudioWorklet setup failed: ${workletError.message}. Using ScriptProcessor.`, 'warning');
+                        this.useAudioWorklet = false;
+                    }
+                } else {
+                    this.log('AudioWorklet not supported, using ScriptProcessor');
+                    this.useAudioWorklet = false;
+                }
+                
+                // Fallback to ScriptProcessor
+                if (!this.useAudioWorklet) {
+                    // FIXED: Increased buffer size for better stability
+                    this.audioProcessor = this.audioContext.createScriptProcessor(8192, 1, 1);
+                    
+                    this.audioProcessor.onaudioprocess = (event) => {
+                        if (this.isRecording && !this.isAISpeaking && this.currentSessionId) {
+                            // FIXED: Added throttling to reduce network load
+                            if (!this.lastAudioSendTime || Date.now() - this.lastAudioSendTime > 100) {
+                                this.sendAudioChunk(event.inputBuffer);
+                                this.lastAudioSendTime = Date.now();
+                            }
+                        } else {
+                            // Debug why audio chunks aren't being sent
+                            if (!this.audioProcessDebugCount) this.audioProcessDebugCount = 0;
+                            this.audioProcessDebugCount++;
+                            if (this.audioProcessDebugCount % 100 === 0) {
+                                this.log(`🎤 Audio processing: recording=${this.isRecording}, aiSpeaking=${this.isAISpeaking}, session=${!!this.currentSessionId}`, 'debug');
+                            }
+                        }
+                    };
+                    
+                    source.connect(this.audioProcessor);
+                    // FIXED: Connect to destination with zero gain to keep the audio context active
+                    const silentGain = this.audioContext.createGain();
+                    silentGain.gain.value = 0;
+                    this.audioProcessor.connect(silentGain);
+                    silentGain.connect(this.audioContext.destination);
+                }
+            }
+            
+            this.log('Audio streaming initialized successfully');
         } catch (error) {
             this.log(`Audio streaming initialization failed: ${error.message}`, 'error');
             this.audioStreamingEnabled = false;
@@ -680,26 +875,89 @@ class EnhancedHybridVAD {
             return;
         }
         
+        // FIXED: Check socket connection status
+        if (!this.socket.connected) {
+            this.log('Socket not connected, cannot send audio chunk', 'debug');
+            return;
+        }
+        
+        // FIXED: Throttle audio sending to reduce network load
+        if (this.lastAudioSendTime && Date.now() - this.lastAudioSendTime < this.config.audioThrottleMs) {
+            return;
+        }
+        this.lastAudioSendTime = Date.now();
+        
         try {
+            // FIXED: Check for silence before sending
+            const isSilent = this.isAudioBufferSilent(audioBuffer);
+            if (isSilent) {
+                // Skip silent frames to reduce bandwidth
+                if (!this.silentFrameCount) this.silentFrameCount = 0;
+                this.silentFrameCount++;
+                
+                if (this.silentFrameCount % 50 === 0) {
+                    this.log(`Skipped ${this.silentFrameCount} silent audio frames`);
+                }
+                return;
+            }
+            
             // Convert audio buffer to base64
             const audioData = this.audioBufferToBase64(audioBuffer);
             
-            // Send to backend
-            this.socket.emit('audio_stream', {
-                session_id: this.currentSessionId,
-                audio_data: audioData
+            // FIXED: Check data size before sending
+            const dataSizeKB = Math.round(audioData.length / 1024);
+            if (dataSizeKB > 50) {
+                this.log(`Audio chunk too large (${dataSizeKB}KB), skipping`);
+                return;
+            }
+            
+            // Send to backend with timeout
+            const sendPromise = new Promise((resolve, reject) => {
+                this.socket.emit('audio_stream', {
+                    session_id: this.currentSessionId,
+                    audio_data: audioData
+                }, (ack) => {
+                    // Handle acknowledgment if the server supports it
+                    if (ack && ack.status === 'error') {
+                        reject(new Error(ack.message || 'Unknown error'));
+                    } else {
+                        resolve();
+                    }
+                });
+                
+                // Resolve anyway after timeout (Socket.IO might not support acks)
+                setTimeout(resolve, 1000);
             });
             
             // Log every 50th chunk to avoid spam
             if (!this.audioChunkCount) this.audioChunkCount = 0;
             this.audioChunkCount++;
             if (this.audioChunkCount % 50 === 0) {
-                this.log(`📡 Sent ${this.audioChunkCount} audio chunks`);
+                this.log(`📡 Sent ${this.audioChunkCount} audio chunks (${dataSizeKB}KB)`);
             }
             
         } catch (error) {
             this.log(`Error sending audio chunk: ${error.message}`, 'error');
         }
+    }
+    
+    /**
+     * FIXED: Check if audio buffer is silent (to avoid sending silent frames)
+     */
+    isAudioBufferSilent(audioBuffer) {
+        const channelData = audioBuffer.getChannelData(0);
+        const bufferLength = channelData.length;
+        
+        // Calculate RMS (root mean square) of the audio buffer
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+            sum += channelData[i] * channelData[i];
+        }
+        const rms = Math.sqrt(sum / bufferLength);
+        
+        // Consider silent if RMS is below threshold
+        const isSilent = rms < 0.01;
+        return isSilent;
     }
     
     /**

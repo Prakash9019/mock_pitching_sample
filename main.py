@@ -721,6 +721,40 @@ async def debug_conversations():
         logger.error(f"Error getting debug info: {str(e)}")
         return {"error": str(e)}
 
+@fastapi_app.get("/api/debug/video-analysis/{session_id}")
+async def debug_video_analysis_status(session_id: str):
+    """Debug: Check video analysis status for a session"""
+    try:
+        from app.services.langgraph_workflow import get_pitch_workflow
+        
+        workflow = get_pitch_workflow()
+        if not workflow:
+            return {"error": "Workflow not available"}
+        
+        config = {"configurable": {"thread_id": session_id}}
+        current_state = workflow.workflow.get_state(config)
+        
+        if not current_state.values:
+            return {"error": "Session not found"}
+        
+        state = current_state.values
+        
+        return {
+            "session_id": session_id,
+            "video_analysis_enabled": state.get('video_analysis_enabled', False),
+            "video_insights_count": len(state.get('video_insights', [])),
+            "gesture_feedback_count": len(state.get('gesture_feedback', [])),
+            "posture_feedback_count": len(state.get('posture_feedback', [])),
+            "expression_feedback_count": len(state.get('expression_feedback', [])),
+            "video_analysis_available": VIDEO_ANALYSIS_AVAILABLE,
+            "recent_video_insights": state.get('video_insights', [])[-3:] if state.get('video_insights') else [],
+            "fix_status": "Video analysis fix applied - scores should be reasonable even when video not available"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting video analysis debug info: {str(e)}")
+        return {"error": str(e)}
+
 # ===== NEW IMPROVED AI SYSTEMS ENDPOINTS =====
 
 @fastapi_app.post("/api/pitch/start")
