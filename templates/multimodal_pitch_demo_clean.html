@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="format-detection" content="telephone=no">
     <title>AI Pitch Practice - Multimodal Analysis</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -117,6 +119,14 @@
                         </label>
                     </div>
 
+                    <!-- TTS Mode Info -->
+                    <div class="text-sm text-white/80 mb-4">
+                        <span class="inline-flex items-center">
+                            🌐 <strong class="ml-1">Google Cloud TTS</strong>
+                            <span class="ml-2 text-xs bg-green-600 px-2 py-1 rounded-full">Server-side</span>
+                        </span>
+                    </div>
+
                     <!-- Volume Control -->
                     <div class="mb-4">
                         <label class="block text-white/80 text-sm font-medium mb-2">
@@ -142,9 +152,9 @@
                                 class="bg-orange-500 hover:bg-orange-600 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
                             🔍 Debug Audio
                         </button>
-                        <button onclick="testAudioStreaming()" 
-                                class="bg-amber-600 hover:bg-amber-700 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
-                            🎵 Test Stream
+                        <button onclick="testServerTTS()" 
+                                class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm">
+                            🌐 Test Server TTS
                         </button>
                     </div>
                 </div>
@@ -499,6 +509,13 @@
                 log('🚀 Starting system initialization...');
                 updateConnectionStatus('Starting...', 'warning');
                 
+                // Detect browser for Edge-specific handling
+                const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+                if (isEdge) {
+                    log('🌐 Edge browser detected - using Edge-optimized initialization');
+                    addMessage('system', '🌐 Microsoft Edge detected - optimizing for compatibility');
+                }
+                
                 // Request microphone permission first
                 log('🎤 Step 1: Requesting microphone permission...');
                 await requestMicrophonePermission();
@@ -515,13 +532,17 @@
                 log('📊 Step 5: Setting up video analysis listeners...');
                 setupVideoAnalysisEventListeners();
                 
-                // Start real-time metrics updates
+                // Start real-time metrics updates with Edge-specific timing
                 log('📈 Step 6: Starting real-time metrics...');
-                setInterval(updateRealtimeMetrics, 3000);
+                const metricsInterval = isEdge ? 4000 : 3000; // Slightly slower for Edge
+                setInterval(updateRealtimeMetrics, metricsInterval);
                 
                 log('✅ System initialized successfully');
                 addMessage('system', '✅ Enhanced Multimodal System Ready!');
                 addMessage('system', '🔬 Professional CV libraries loaded and ready');
+                if (isEdge) {
+                    addMessage('system', '🌐 Edge browser optimizations applied');
+                }
                 addMessage('system', '🎯 Click "Start Practice Session" to begin your enhanced pitch analysis!');
                 
             } catch (error) {
@@ -532,6 +553,15 @@
                 
                 // Show retry button
                 document.getElementById('retry-connection-btn').style.display = 'block';
+                
+                // Edge-specific error handling
+                const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+                if (isEdge) {
+                    addMessage('system', '🌐 Edge-specific troubleshooting:');
+                    addMessage('system', '• Ensure microphone permissions are granted');
+                    addMessage('system', '• Try refreshing the page');
+                    addMessage('system', '• Check if Edge is up to date');
+                }
                 
                 // Show specific troubleshooting based on error
                 if (error.message.includes('EnhancedHybridVAD')) {
@@ -1654,14 +1684,44 @@
             log('🔍 Running system debug...');
             addMessage('system', '🔍 System Debug Information:');
             
+            // Browser detection
+            const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+            const isChrome = navigator.userAgent.indexOf('Chrome') !== -1 && !isEdge;
+            const isSafari = navigator.userAgent.indexOf('Safari') !== -1 && !isChrome && !isEdge;
+            const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
+            
+            addMessage('system', `🌐 Browser: ${isEdge ? 'Microsoft Edge' : isChrome ? 'Chrome' : isSafari ? 'Safari' : isFirefox ? 'Firefox' : 'Unknown'}`);
+            addMessage('system', `📱 User Agent: ${navigator.userAgent}`);
+            
             // Check dependencies
             addMessage('system', `Socket.IO: ${typeof io !== 'undefined' ? '✅ Loaded' : '❌ Not loaded'}`);
             addMessage('system', `EnhancedHybridVAD: ${typeof EnhancedHybridVAD !== 'undefined' ? '✅ Loaded' : '❌ Not loaded'}`);
             
-            // Check browser capabilities
+            // Check browser capabilities with Edge-specific details
             addMessage('system', `getUserMedia: ${navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '✅ Available' : '❌ Not available'}`);
             addMessage('system', `WebRTC: ${window.RTCPeerConnection ? '✅ Available' : '❌ Not available'}`);
-            addMessage('system', `Web Speech API: ${window.SpeechRecognition || window.webkitSpeechRecognition ? '✅ Available' : '❌ Not available'}`);
+            
+            // Speech API with Edge-specific checks
+            const hasSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const hasWebkitSpeech = window.webkitSpeechRecognition;
+            const hasStandardSpeech = window.SpeechRecognition;
+            
+            addMessage('system', `Web Speech API: ${hasSpeechRecognition ? '✅ Available' : '❌ Not available'}`);
+            if (isEdge) {
+                addMessage('system', `  • Standard SpeechRecognition: ${hasStandardSpeech ? '✅' : '❌'}`);
+                addMessage('system', `  • Webkit SpeechRecognition: ${hasWebkitSpeech ? '✅' : '❌'}`);
+            }
+            
+            // TTS capabilities (Server-side Google Cloud TTS only)
+            addMessage('system', `Text-to-Speech: 🌐 Google Cloud TTS (Server-side)`);
+            
+            // Audio Context with Edge-specific checks
+            const hasAudioContext = window.AudioContext || window.webkitAudioContext;
+            addMessage('system', `AudioContext: ${hasAudioContext ? '✅ Available' : '❌ Not available'}`);
+            if (isEdge) {
+                addMessage('system', `  • Standard AudioContext: ${window.AudioContext ? '✅' : '❌'}`);
+                addMessage('system', `  • Webkit AudioContext: ${window.webkitAudioContext ? '✅' : '❌'}`);
+            }
             
             // Check current state
             addMessage('system', `Enhanced VAD Instance: ${enhancedVAD ? '✅ Created' : '❌ Not created'}`);
@@ -1673,8 +1733,18 @@
             addMessage('system', `Video Element Ready: ${document.getElementById('videoPreview')?.readyState >= 2 ? '✅ Ready' : '❌ Not ready'}`);
             addMessage('system', `Video Analysis Interval: ${videoAnalysisInterval ? '✅ Running' : '❌ Not running'}`);
             
+            // Edge-specific recommendations
+            if (isEdge) {
+                addMessage('system', '🌐 Edge-specific recommendations:');
+                addMessage('system', '• Ensure Edge is updated to latest version');
+                addMessage('system', '• Check microphone permissions in Edge settings');
+                addMessage('system', '• Try clearing browser cache if issues persist');
+                addMessage('system', '• Disable ad blockers that might interfere with WebRTC');
+            }
+            
             // Log to console for detailed debugging
             console.log('🔍 Debug Info:', {
+                browser: isEdge ? 'Edge' : isChrome ? 'Chrome' : isSafari ? 'Safari' : isFirefox ? 'Firefox' : 'Unknown',
                 io: typeof io,
                 EnhancedHybridVAD: typeof EnhancedHybridVAD,
                 enhancedVAD: enhancedVAD,
@@ -1683,7 +1753,17 @@
                 lastVideoAnalysisTime: lastVideoAnalysisTime,
                 mediaStream: mediaStream,
                 userAgent: navigator.userAgent,
-                location: window.location.href
+                location: window.location.href,
+                speechAPIs: {
+                    SpeechRecognition: !!window.SpeechRecognition,
+                    webkitSpeechRecognition: !!window.webkitSpeechRecognition,
+                    ttsMode: 'Google Cloud TTS (Server-side only)'
+                },
+                audioAPIs: {
+                    AudioContext: !!window.AudioContext,
+                    webkitAudioContext: !!window.webkitAudioContext,
+                    getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+                }
             });
         }
         
@@ -1709,6 +1789,66 @@
                 }
             } else {
                 addMessage('system', '❌ Cannot test frame capture: missing session or socket');
+            }
+        }
+
+        async function startSession() {
+            log('🚀 Starting practice session...');
+            addMessage('system', '🚀 Starting practice session...');
+            
+            if (!enhancedVAD) {
+                addMessage('system', '❌ Enhanced VAD not initialized');
+                return;
+            }
+            
+            const persona = document.getElementById('personaSelect').value;
+            
+            // Generate session ID
+            const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            try {
+                // Start the session
+                await enhancedVAD.startSession(newSessionId, persona);
+                
+                // Update global session ID
+                sessionId = newSessionId;
+                
+                // Update UI
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = false;
+                
+                addMessage('system', `✅ Session started with ${persona} investor persona`);
+                addMessage('system', `📋 Session ID: ${newSessionId}`);
+            } catch (error) {
+                addMessage('system', `❌ Failed to start session: ${error.message}`);
+                log(`Start session error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function stopSession() {
+            log('⏹️ Stopping practice session...');
+            addMessage('system', '⏹️ Stopping practice session...');
+            
+            if (!enhancedVAD) {
+                addMessage('system', '❌ Enhanced VAD not initialized');
+                return;
+            }
+            
+            try {
+                // Stop the session
+                await enhancedVAD.stopSession();
+                
+                // Clear global session ID
+                sessionId = null;
+                
+                // Update UI
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                
+                addMessage('system', '✅ Session stopped');
+            } catch (error) {
+                addMessage('system', `❌ Failed to stop session: ${error.message}`);
+                log(`Stop session error: ${error.message}`, 'error');
             }
         }
 
@@ -1740,18 +1880,12 @@
             }
         }
 
+
+
         function testTTS() {
-            log('🔊 Testing Text-to-Speech...');
-            addMessage('system', '🔊 Testing Text-to-Speech...');
+            log('🌐 Testing Google Cloud TTS (Server-side only)...');
+            addMessage('system', '🌐 Testing Google Cloud TTS...');
             
-            if ('speechSynthesis' in window) {
-                const utterance = new SpeechSynthesisUtterance('Hello! This is a test of the text-to-speech system.');
-                utterance.volume = document.getElementById('ttsVolume').value / 100;
-                speechSynthesis.speak(utterance);
-                addMessage('system', '✅ TTS test started');
-            } else {
-                addMessage('system', '❌ TTS not supported');
-            }
         }
 
         function debugAudioStreaming() {
@@ -1766,6 +1900,57 @@
                 .catch(error => {
                     addMessage('system', `❌ Audio access failed: ${error.message}`);
                 });
+        }
+
+        async function testServerTTS() {
+            log('🌐 Testing server-side Google Cloud TTS...');
+            addMessage('system', '🌐 Testing server-side Google Cloud TTS...');
+            
+            try {
+                const response = await fetch('/api/tts/test?text=Hello! This is a test of the Google Cloud Text-to-Speech system.&persona=friendly');
+                const data = await response.json();
+                
+                if (data.success && data.audio_data) {
+                    addMessage('system', '✅ Server TTS generated successfully');
+                    addMessage('system', `📊 Audio size: ${data.audio_size} bytes`);
+                    
+                    // Play the server-generated audio
+                    if (enhancedVAD && enhancedVAD.playServerTTSAudio) {
+                        addMessage('system', '🔊 Playing server TTS audio...');
+                        await enhancedVAD.playServerTTSAudio(data.audio_data, data.text);
+                        addMessage('system', '✅ Server TTS playback completed');
+                    } else {
+                        // Fallback: create audio element directly
+                        const audioBytes = atob(data.audio_data);
+                        const audioArray = new Uint8Array(audioBytes.length);
+                        for (let i = 0; i < audioBytes.length; i++) {
+                            audioArray[i] = audioBytes.charCodeAt(i);
+                        }
+                        
+                        const audioBlob = new Blob([audioArray], { type: 'audio/mp3' });
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        const audio = new Audio(audioUrl);
+                        
+                        audio.onended = () => {
+                            URL.revokeObjectURL(audioUrl);
+                            addMessage('system', '✅ Server TTS playback completed');
+                        };
+                        
+                        audio.onerror = (error) => {
+                            addMessage('system', `❌ Audio playback failed: ${error.message || 'Unknown error'}`);
+                            URL.revokeObjectURL(audioUrl);
+                        };
+                        
+                        addMessage('system', '🔊 Playing server TTS audio...');
+                        await audio.play();
+                    }
+                } else {
+                    addMessage('system', `❌ Server TTS failed: ${data.detail || 'Unknown error'}`);
+                }
+            } catch (error) {
+                addMessage('system', `❌ Server TTS test failed: ${error.message}`);
+                log(`Server TTS test error: ${error.message}`, 'error');
+            }
         }
 
         function testAudioStreaming() {

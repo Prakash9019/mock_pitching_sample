@@ -311,6 +311,38 @@ async def database_status():
     }
 
 
+@fastapi_app.get("/api/tts/test")
+async def test_tts(
+    text: str = "Hello! This is a test of the Google Cloud Text-to-Speech system.",
+    persona: str = "friendly"
+):
+    """Test endpoint for Google Cloud TTS"""
+    try:
+        logger.info(f"Testing TTS with text: '{text}' and persona: '{persona}'")
+        
+        # Generate TTS audio
+        audio_data = convert_text_to_speech_with_persona(text, persona)
+        
+        if audio_data is None:
+            raise HTTPException(status_code=500, detail="TTS generation failed")
+        
+        # Convert to base64 for JSON response
+        import base64
+        audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+        
+        return {
+            "success": True,
+            "message": "TTS generated successfully",
+            "text": text,
+            "persona": persona,
+            "audio_data": audio_base64,
+            "audio_size": len(audio_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"TTS test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"TTS test failed: {str(e)}")
+
 @fastapi_app.post("/pitch")
 async def process_pitch(
     background_tasks: BackgroundTasks,

@@ -16,10 +16,7 @@ class EnhancedHybridVAD {
             socketUrl: window.location.origin,
             pauseThreshold: 2000,        // 2 seconds pause to send
             minSpeechDuration: 1000,     // Minimum 1 second of speech
-            ttsEnabled: true,            // Enable Text-to-Speech
-            ttsVoice: null,              // Will be set to best available voice
-            ttsRate: 1.0,                // Speech rate
-            ttsPitch: 1.0,               // Speech pitch
+            ttsEnabled: true,            // Enable Text-to-Speech (Server-side Google Cloud TTS only)
             ttsVolume: 0.8,              // Speech volume
             debug: true,                 // FIXED: Enable debug by default
             reconnectAttempts: 5,        // FIXED: Socket reconnect attempts
@@ -37,8 +34,7 @@ class EnhancedHybridVAD {
         this.mediaStream = null;
         this.socket = null;
         this.speechRecognition = null;
-        this.speechSynthesis = null;    // TTS synthesis
-        this.currentUtterance = null;   // Current TTS utterance
+        this.currentAudio = null;       // Current server TTS audio
         
         // FIXED: Error tracking
         this.recognitionErrorCount = 0;
@@ -100,21 +96,37 @@ class EnhancedHybridVAD {
         try {
             this.log('Initializing enhanced hybrid VAD system...');
             
-            // Initialize TTS first
-            await this.initializeTTS();
+            // Detect browser for Edge-specific handling
+            const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+            if (isEdge) {
+                this.log('Edge browser detected - using Edge-optimized initialization');
+            }
+            
+            // Note: Using server-side Google Cloud TTS only - no browser TTS initialization needed
             
             // Initialize Socket.IO connection
             await this.initializeSocket();
             
             // Initialize speech recognition for real-time transcription
-            await this.initializeSpeechRecognition();
+            try {
+                await this.initializeSpeechRecognition();
+            } catch (speechError) {
+                this.log(`Speech recognition initialization failed: ${speechError.message}`, 'warning');
+                // Continue initialization even if speech recognition fails
+            }
             
             // Initialize audio context for VAD
             await this.initializeAudioContext();
             
             // Initialize audio streaming for backend processing
             if (this.audioStreamingEnabled) {
-                await this.initializeAudioStreaming();
+                try {
+                    await this.initializeAudioStreaming();
+                } catch (audioError) {
+                    this.log(`Audio streaming initialization failed: ${audioError.message}`, 'warning');
+                    // Continue without audio streaming if it fails
+                    this.audioStreamingEnabled = false;
+                }
             }
             
             this.isInitialized = true;
@@ -128,47 +140,7 @@ class EnhancedHybridVAD {
         }
     }
     
-    /**
-     * Initialize Text-to-Speech
-     */
-    async initializeTTS() {
-        if (!('speechSynthesis' in window)) {
-            this.log('TTS not supported in this browser', 'warning');
-            this.config.ttsEnabled = false;
-            return;
-        }
-        
-        this.speechSynthesis = window.speechSynthesis;
-        
-        // Wait for voices to load
-        return new Promise((resolve) => {
-            const loadVoices = () => {
-                const voices = this.speechSynthesis.getVoices();
-                
-                if (voices.length > 0) {
-                    // Find the best English voice
-                    this.config.ttsVoice = voices.find(voice => 
-                        voice.lang.startsWith('en') && voice.name.includes('Google')
-                    ) || voices.find(voice => 
-                        voice.lang.startsWith('en')
-                    ) || voices[0];
-                    
-                    this.log(`TTS initialized with voice: ${this.config.ttsVoice.name}`);
-                    resolve();
-                } else {
-                    // Voices not loaded yet, wait a bit
-                    setTimeout(loadVoices, 100);
-                }
-            };
-            
-            // Handle voice loading
-            if (this.speechSynthesis.onvoiceschanged !== undefined) {
-                this.speechSynthesis.onvoiceschanged = loadVoices;
-            }
-            
-            loadVoices();
-        });
-    }
+
     
     /**
      * Initialize Socket.IO connection with enhanced events
@@ -276,8 +248,9 @@ class EnhancedHybridVAD {
             });
             
             this.socket.on('transcription_result', (data) => {
-                this.log(`Final transcription: ${data.transcript}`);
-                this.callbacks.onFinalTranscript?.(data);
+                const transcriptText = data.text || (typeof data.transcript === 'string' ? data.transcript : data.transcript?.text || '');
+                this.log(`Final transcription: ${transcriptText}`);
+                this.callbacks.onFinalTranscript?.({ ...data, text: transcriptText });
             });
             
             // Enhanced AI response handling
@@ -299,13 +272,22 @@ class EnhancedHybridVAD {
     }
     
     /**
-     * Handle AI response with TTS and conversation flow
+     * Handle AI response with server-side Google Cloud TTS only
      */
     async handleAIResponse(data) {
         this.callbacks.onAIResponse?.(data);
         
         if (this.config.ttsEnabled && data.message) {
-            await this.speakAIResponse(data.message);
+            if (data.audio_data) {
+                this.log('Using server-side Google Cloud TTS audio');
+                await this.playServerTTSAudio(data.audio_data, data.message);
+            } else {
+                this.log('No server TTS audio available - skipping TTS', 'warning');
+                // Resume listening immediately if no TTS audio
+                setTimeout(() => {
+                    this.resumeListening();
+                }, 500);
+            }
         } else {
             // If TTS is disabled, resume listening after a short delay
             setTimeout(() => {
@@ -315,10 +297,10 @@ class EnhancedHybridVAD {
     }
     
     /**
-     * Speak AI response using TTS
+     * Play server-side TTS audio (Google Cloud TTS)
      */
-    async speakAIResponse(message) {
-        if (!this.config.ttsEnabled || !this.speechSynthesis) {
+    async playServerTTSAudio(audioBase64, message) {
+        if (!this.config.ttsEnabled) {
             return;
         }
         
@@ -333,56 +315,112 @@ class EnhancedHybridVAD {
         this.pauseListening();
         
         return new Promise((resolve) => {
-            this.currentUtterance = new SpeechSynthesisUtterance(message);
-            
-            // Configure voice
-            if (this.config.ttsVoice) {
-                this.currentUtterance.voice = this.config.ttsVoice;
-            }
-            this.currentUtterance.rate = this.config.ttsRate;
-            this.currentUtterance.pitch = this.config.ttsPitch;
-            this.currentUtterance.volume = this.config.ttsVolume;
-            
-            // Handle TTS events
-            this.currentUtterance.onstart = () => {
-                this.log('TTS started');
-                this.callbacks.onTTSStart?.({ message });
-            };
-            
-            this.currentUtterance.onend = () => {
-                this.log('TTS finished');
-                this.isAISpeaking = false;
-                this.callbacks.onTTSEnd?.({ message });
+            try {
+                // Convert base64 to audio blob
+                const audioBytes = atob(audioBase64);
+                const audioArray = new Uint8Array(audioBytes.length);
+                for (let i = 0; i < audioBytes.length; i++) {
+                    audioArray[i] = audioBytes.charCodeAt(i);
+                }
                 
-                // Resume listening after AI finishes speaking
-                setTimeout(() => {
+                const audioBlob = new Blob([audioArray], { type: 'audio/mp3' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                
+                // Create audio element
+                this.currentAudio = new Audio(audioUrl);
+                this.currentAudio.volume = this.config.ttsVolume;
+                
+                // Handle audio events
+                this.currentAudio.onloadstart = () => {
+                    this.log('Server TTS audio loading...');
+                };
+                
+                this.currentAudio.oncanplay = () => {
+                    this.log('Server TTS audio ready to play');
+                };
+                
+                this.currentAudio.onplay = () => {
+                    this.log('Server TTS audio started');
+                    this.callbacks.onTTSStart?.({ message, source: 'server' });
+                };
+                
+                this.currentAudio.onended = () => {
+                    this.log('Server TTS audio finished');
+                    this.isAISpeaking = false;
+                    this.callbacks.onTTSEnd?.({ message, source: 'server' });
+                    
+                    // Clean up
+                    URL.revokeObjectURL(audioUrl);
+                    this.currentAudio = null;
+                    
+                    // Resume listening after AI finishes speaking
+                    setTimeout(() => {
+                        this.resumeListening();
+                        resolve();
+                    }, 500); // Small delay before resuming
+                };
+                
+                this.currentAudio.onerror = (event) => {
+                    this.log(`Server TTS audio error: ${event.error || 'Unknown error'}`, 'error');
+                    this.isAISpeaking = false;
+                    this.callbacks.onError?.({ type: 'server_tts', error: event.error || 'Audio playback failed' });
+                    
+                    // Clean up
+                    URL.revokeObjectURL(audioUrl);
+                    this.currentAudio = null;
+                    
                     this.resumeListening();
                     resolve();
-                }, 500); // Small delay before resuming
-            };
-            
-            this.currentUtterance.onerror = (event) => {
-                this.log(`TTS error: ${event.error}`, 'error');
+                };
+                
+                // Start playing
+                this.currentAudio.play().catch(error => {
+                    this.log(`Failed to play server TTS audio: ${error.message}`, 'error');
+                    this.isAISpeaking = false;
+                    this.callbacks.onError?.({ type: 'server_tts', error: error.message });
+                    
+                    // Clean up
+                    URL.revokeObjectURL(audioUrl);
+                    this.currentAudio = null;
+                    
+                    this.resumeListening();
+                    resolve();
+                });
+                
+            } catch (error) {
+                this.log(`Error processing server TTS audio: ${error.message}`, 'error');
                 this.isAISpeaking = false;
-                this.callbacks.onError?.({ type: 'tts', error: event.error });
+                this.callbacks.onError?.({ type: 'server_tts', error: error.message });
                 this.resumeListening();
                 resolve();
-            };
-            
-            // Start speaking
-            this.speechSynthesis.speak(this.currentUtterance);
+            }
         });
     }
     
+
+    
     /**
-     * Stop current TTS
+     * Stop current server TTS audio
      */
     stopTTS() {
-        if (this.speechSynthesis && this.speechSynthesis.speaking) {
-            this.speechSynthesis.cancel();
+        // Stop server audio
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio.currentTime = 0;
+            this.currentAudio = null;
         }
-        this.currentUtterance = null;
+        
         this.isAISpeaking = false;
+    }
+    
+    /**
+     * Get current TTS mode (Server-side Google Cloud TTS only)
+     */
+    getTTSMode() {
+        return {
+            mode: 'server',
+            description: 'Google Cloud TTS (Server-side only)'
+        };
     }
     
     /**
@@ -472,11 +510,27 @@ class EnhancedHybridVAD {
      * Initialize speech recognition with enhanced flow control
      */
     async initializeSpeechRecognition() {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        // Enhanced browser detection for Edge compatibility
+        const hasWebkitSpeechRecognition = 'webkitSpeechRecognition' in window;
+        const hasSpeechRecognition = 'SpeechRecognition' in window;
+        
+        if (!hasWebkitSpeechRecognition && !hasSpeechRecognition) {
+            this.log('Speech recognition not supported in this browser', 'warning');
             throw new Error('Speech recognition not supported in this browser');
         }
         
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        // Edge-specific: Prefer SpeechRecognition over webkitSpeechRecognition for Edge
+        const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+        let SpeechRecognition;
+        
+        if (isEdge && hasSpeechRecognition) {
+            SpeechRecognition = window.SpeechRecognition;
+            this.log('Using SpeechRecognition API for Edge browser');
+        } else {
+            SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            this.log('Using standard SpeechRecognition API');
+        }
+        
         this.speechRecognition = new SpeechRecognition();
         
         // Configure for hybrid mode - FIXED: Changed continuous to false to prevent network errors
@@ -728,16 +782,35 @@ class EnhancedHybridVAD {
      */
     async initializeAudioContext() {
         try {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            // Edge-specific audio context initialization
+            const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+            
+            if (isEdge) {
+                // Edge prefers AudioContext over webkitAudioContext
+                if (window.AudioContext) {
+                    this.audioContext = new AudioContext();
+                    this.log('Using AudioContext for Edge browser');
+                } else if (window.webkitAudioContext) {
+                    this.audioContext = new webkitAudioContext();
+                    this.log('Using webkitAudioContext fallback for Edge');
+                } else {
+                    throw new Error('No AudioContext available');
+                }
+            } else {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.log('Using standard AudioContext');
+            }
             
             // Resume audio context if suspended (required by browser policies)
             if (this.audioContext.state === 'suspended') {
                 await this.audioContext.resume();
+                this.log('Audio context resumed from suspended state');
             }
             
             this.log(`Audio context initialized (state: ${this.audioContext.state})`);
         } catch (error) {
             this.log(`Audio context initialization failed: ${error.message}`, 'error');
+            // Don't throw error, allow app to continue without audio context
         }
     }
     
@@ -746,21 +819,39 @@ class EnhancedHybridVAD {
      */
     async initializeAudioStreaming() {
         try {
-            // FIXED: More robust microphone access with fallback options
-            const constraints = {
-                audio: {
-                    sampleRate: { ideal: 16000 },
-                    channelCount: { ideal: 1 },
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            };
+            // Edge-specific microphone access with enhanced fallback options
+            const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+            
+            let constraints;
+            if (isEdge) {
+                // Edge-optimized constraints
+                constraints = {
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                };
+                this.log('Using Edge-optimized audio constraints');
+            } else {
+                // Standard constraints for other browsers
+                constraints = {
+                    audio: {
+                        sampleRate: { ideal: 16000 },
+                        channelCount: { ideal: 1 },
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                };
+            }
             
             try {
-                // Try with ideal settings first
+                // Try with optimized settings first
                 this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-                this.log('Got microphone access with ideal settings');
+                this.log('Got microphone access with optimized settings');
             } catch (initialError) {
                 this.log(`Initial microphone access failed: ${initialError.message}. Trying fallback...`, 'warning');
                 
@@ -769,6 +860,7 @@ class EnhancedHybridVAD {
                     this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     this.log('Got microphone access with fallback settings');
                 } catch (fallbackError) {
+                    this.log(`All microphone access attempts failed: ${fallbackError.message}`, 'error');
                     throw new Error(`Microphone access failed: ${fallbackError.message}`);
                 }
             }

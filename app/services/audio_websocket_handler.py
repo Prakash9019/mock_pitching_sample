@@ -87,11 +87,17 @@ class AudioWebSocketHandler:
                     'workflow': workflow
                 }
                 
-                await self.sio.emit('audio_session_started', {
-                    'session_id': session_id,
-                    'message': result.get('message', ''),
-                    'status': 'ready_for_audio'
-                }, room=sid)
+                # Generate TTS for the initial greeting message
+                greeting_message = result.get('message', '')
+                if greeting_message:
+                    logger.info(f"Generating TTS for initial greeting: '{greeting_message[:50]}...'")
+                    await self._generate_tts_for_response(session_id, greeting_message, sid)
+                else:
+                    await self.sio.emit('audio_session_started', {
+                        'session_id': session_id,
+                        'message': '',
+                        'status': 'ready_for_audio'
+                    }, room=sid)
                 
                 logger.info(f"Audio session started: {session_id} for client {sid}")
                 
@@ -417,18 +423,22 @@ class AudioWebSocketHandler:
                 from app.services.transcription import transcribe_audio
                 
                 # Transcribe the audio
-                transcript = transcribe_audio(temp_file_path)
-                logger.info(f"Transcription result: {transcript}")
+                transcript_result = transcribe_audio(temp_file_path)
+                logger.info(f"Transcription result: {transcript_result}")
+                
+                # Extract text from transcription result
+                transcript_text = transcript_result.get('text', '') if isinstance(transcript_result, dict) else str(transcript_result)
                 
                 # Send transcription to client
                 await self.sio.emit('transcription_result', {
                     'session_id': session_id,
-                    'transcript': transcript
+                    'transcript': transcript_result,
+                    'text': transcript_text
                 }, room=socket_id)
                 
                 # Generate AI response
-                if transcript.strip():
-                    await self._generate_ai_response(session_id, transcript, socket_id)
+                if transcript_text.strip():
+                    await self._generate_ai_response(session_id, transcript_text, socket_id)
                 
             finally:
                 # Clean up temporary file
@@ -493,8 +503,8 @@ class AudioWebSocketHandler:
                 import base64
                 audio_base64 = base64.b64encode(audio_file_data).decode('utf-8')
                 
-                logger.info(f"Sending ai_audio_response event to room: {socket_id}")
-                await self.sio.emit('ai_audio_response', {
+                logger.info(f"Sending ai_response event to room: {socket_id}")
+                await self.sio.emit('ai_response', {
                     'session_id': session_id,
                     'audio_data': audio_base64,
                     'message': ai_response
@@ -553,8 +563,8 @@ class AudioWebSocketHandler:
                 import base64
                 audio_base64 = base64.b64encode(audio_file_data).decode('utf-8')
                 
-                logger.info(f"Sending ai_audio_response event to room: {socket_id}")
-                await self.sio.emit('ai_audio_response', {
+                logger.info(f"Sending ai_response event to room: {socket_id}")
+                await self.sio.emit('ai_response', {
                     'session_id': session_id,
                     'audio_data': audio_base64,
                     'message': ai_response
