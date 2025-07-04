@@ -1536,7 +1536,6 @@ Generate your next question as {persona_info['name']}, applying your characteris
                 # Debug: Log state video analysis info
                 logger.info(f"Analysis Debug - Video enabled: {state.get('video_analysis_enabled', False)}, Video insights: {len(state.get('video_insights', []))}, Gesture feedback: {len(state.get('gesture_feedback', []))}")
                 
-                print(analysis_prompt)
                 analysis_response = llm.invoke(analysis_prompt)
                 analysis_text = analysis_response.content
                 
