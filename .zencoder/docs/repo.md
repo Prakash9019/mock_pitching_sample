@@ -5,10 +5,11 @@ A sophisticated platform that helps founders practice investor pitches with AI-p
 
 ## Structure
 - **app/**: Core application package with database models and services
+  - **services/**: Backend services for audio, transcription, and AI workflows
+  - **models/**: Database models and schemas
 - **data/**: Runtime data storage for uploads, responses, and sessions
 - **static/**: Static web assets including JavaScript files
 - **templates/**: HTML templates for web interface
-- **Dockerfile**: Multi-stage container configuration
 - **main.py**: Application entry point with FastAPI and Socket.IO setup
 
 ## Language & Runtime
@@ -19,59 +20,72 @@ A sophisticated platform that helps founders practice investor pitches with AI-p
 
 ## Dependencies
 **Main Dependencies**:
-- **AI & ML**: google-generativeai v0.8.5, langchain v0.3.15, langgraph v0.2.65, openai-whisper v20240930
+- **AI & ML**: google-generativeai v0.8.5, langchain v0.3.15, langgraph v0.2.65
 - **Web Framework**: fastapi v0.115.12, uvicorn v0.34.3, python-socketio v5.13.0
-- **Audio Processing**: librosa v0.10.2, pydub v0.25.1, noisereduce v3.0.3, webrtcvad v2.0.10
-- **Video Analysis**: opencv-python v4.10.0.84, mediapipe v0.10.20, fer v22.5.1, tensorflow v2.19.0
+- **Audio Processing**: librosa v0.10.2, pydub v0.25.1, webrtcvad v2.0.10
+- **Cloud Storage**: google-cloud-storage for audio conversation storage
 - **Database**: pymongo v4.13.2, motor v3.7.1
 
 ## Build & Installation
 ```bash
-# Set up virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/macOS
-.\venv\Scripts\activate   # Windows
-
 # Install dependencies
 pip install -r requirements.txt
 
 # Configure environment variables in .env file
-# Required: GEMINI_API_KEY, OPENAI_API_KEY, MONGODB_URL
+# Required: GOOGLE_APPLICATION_CREDENTIALS, MONGODB_URL
 
 # Start the application
-uvicorn main:app --reload --host 0.0.0.0 --port 8000  # Development
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4  # Production
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Docker
-**Dockerfile**: Multi-stage build with Python 3.11
-**Base Image**: python:3.11-slim
-**Exposed Port**: 8080
-**Run Command**:
-```bash
-docker build -t ai-mock-investor-pitch .
-docker run -p 8080:8080 -e GEMINI_API_KEY=your_key -e OPENAI_API_KEY=your_key ai-mock-investor-pitch
-```
+## Audio Conversation System
+The application features a sophisticated audio conversation system that:
+- Captures user audio through WebSockets using Socket.IO
+- Uses Voice Activity Detection (VAD) to detect speech
+- Transcribes speech to text
+- Generates AI responses through LangGraph workflows
+- Converts AI responses to speech using TTS
+- Stores both user and AI audio for later analysis
+- Combines audio into a complete conversation with proper alternating pattern
+- Uploads conversations to Google Cloud Storage
+- Returns audio URL in the session analysis response
 
-## Main Components
-**API Server**: FastAPI with Socket.IO integration for real-time communication
-**AI Engine**: LangGraph workflow with Google Gemini model for investor simulation
-**Audio Processing**: Whisper transcription and Google Cloud TTS for voice synthesis
-**Video Analysis**: MediaPipe, FER, and CVZone for posture and expression analysis
-**Database**: MongoDB for session storage and analytics
+## Key Components
 
-## Testing
-**Framework**: Python's built-in unittest/asyncio
-**Test Files**: test_session_report.py
-**Run Command**:
-```bash
-python test_session_report.py
-```
+### Audio Storage Service
+The `AudioConversationStorage` class in `app/services/audio_conversation_storage.py`:
+- Manages recording sessions with start/stop functionality
+- Stores user and AI audio segments with timestamps
+- Combines segments into a complete conversation
+- Uploads to Google Cloud Storage with signed URLs
 
-## Key Features
-- Three distinct AI investor personas with different questioning styles
-- 9-stage structured pitch evaluation process
-- Real-time audio processing with noise reduction
-- Video analysis for posture and expression feedback
-- Comprehensive 14-category evaluation system
-- MongoDB integration for session storage and analytics
+### WebSocket Handler
+The `AudioWebSocketHandler` in `app/services/audio_websocket_handler.py`:
+- Manages real-time audio streaming via Socket.IO
+- Processes audio through VAD for speech detection
+- Triggers transcription when speech is detected
+- Generates TTS for AI responses
+- Maintains conversation state and turn-taking
+
+### API Endpoints
+Key endpoints include:
+- `/api/pitch/start`: Start a new pitch session
+- `/api/pitch/message/{session_id}`: Send a text message
+- `/api/pitch/end/{session_id}`: End session, generate analysis, and return audio URL
+
+## Frontend Integration
+The application provides comprehensive frontend integration examples for React, Vue.js, and Angular with:
+- WebSocket connection for real-time audio streaming
+- Audio recording and processing
+- Speech-to-text and text-to-speech handling
+- Session management and analysis display
+
+## Audio Conversation Flow
+1. User audio is captured and streamed to server via WebSockets
+2. Server processes audio using VAD to detect speech
+3. When speech is detected, audio is saved and transcribed
+4. AI generates response through LangGraph workflow
+5. Response is converted to speech and sent back to client
+6. Both user and AI audio are stored with proper timestamps
+7. When session ends, audio is combined and uploaded to cloud storage
+8. Audio URL is included in the final analysis response

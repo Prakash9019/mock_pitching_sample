@@ -1237,6 +1237,11 @@ Generate your next question as {persona_info['name']}, applying your characteris
             if "error" in analytics:
                 return analytics
             
+            # Count founder messages to determine conversation depth
+            # No minimum requirement - we'll analyze any conversation length
+            founder_messages = [msg for msg in state['messages'] if msg.__class__.__name__ == "HumanMessage"]
+            founder_message_count = len(founder_messages)
+            
             # Calculate communication metrics
             comm_metrics = self._calculate_communication_metrics(state['messages'])
             
@@ -1761,17 +1766,28 @@ Generate your next question as {persona_info['name']}, applying your characteris
     def _generate_basic_analysis(self, state: Dict, analytics: Dict) -> Dict[str, Any]:
         """Generate basic analysis when AI analysis fails"""
         
+        # Count founder messages to determine conversation depth
+        founder_messages = [msg for msg in state['messages'] if msg.__class__.__name__ == "HumanMessage"]
+        founder_message_count = len(founder_messages)
+        
+        # No minimum conversation length requirement - proceed with analysis regardless of length
+        # Note: We'll adjust the depth factor to scale scores appropriately for short conversations
+        
         stages_completed = len(analytics['completed_stages'])
         total_insights = sum(len(insights) for insights in analytics['key_insights'].values())
         
         # Calculate communication metrics
         comm_metrics = self._calculate_communication_metrics(state['messages'])
         
-        # Calculate basic scores
-        completion_score = (stages_completed / 9) * 40  # 40% for completion
-        insight_score = min(total_insights * 2, 30)     # 30% for insights quality
-        duration_score = min(analytics['duration_minutes'] / 30 * 20, 20)  # 20% for engagement
-        response_score = min(analytics['total_questions'] * 2, 10)  # 10% for responsiveness
+        # Calculate conversation depth factor (0.1 to 1.0 based on founder message count)
+        # This ensures scores scale with conversation depth but still provides analysis for very short conversations
+        depth_factor = min(1.0, max(0.1, (founder_message_count + 1) / 10))
+        
+        # Calculate basic scores with depth factor applied
+        completion_score = (stages_completed / 9) * 40 * depth_factor  # 40% for completion
+        insight_score = min(total_insights * 2, 30) * depth_factor     # 30% for insights quality
+        duration_score = min(analytics['duration_minutes'] / 30 * 20, 20) * depth_factor  # 20% for engagement
+        response_score = min(analytics['total_questions'] * 2, 10) * depth_factor  # 10% for responsiveness
         
         overall_score = int(completion_score + insight_score + duration_score + response_score)
         
@@ -1782,8 +1798,9 @@ Generate your next question as {persona_info['name']}, applying your characteris
             elif score >= 40: return "Below Average"
             else: return "Need to Improve"
         
-        # Generate basic category scores
-        base_category_score = max(30, overall_score - 20)  # Base score for each category
+        # Generate basic category scores that scale with conversation depth
+        # For very short conversations, scores will be much lower
+        base_category_score = min(max(10, overall_score - 20), 50) * depth_factor
         
         # Calculate video analysis scores if available
         video_enabled = state.get('video_analysis_enabled', False)

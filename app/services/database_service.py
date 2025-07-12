@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.models import (
     PitchAnalysis, PitchSession, ConversationLog, ConversationMessage,
-    QuickAnalytics, CategoryScore, Strength, Weakness
+    QuickAnalytics, CategoryScore, Strength, Weakness, AudioConversationData
 )
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ class DatabaseService:
         self.analyses_collection = database.pitch_analyses if database is not None else None
         self.logs_collection = database.conversation_logs if database is not None else None
         self.analytics_collection = database.quick_analytics if database is not None else None
+        self.audio_conversations_collection = database.audio_conversations if database is not None else None
     
     def _check_connection(self):
         """Check if database connection is available"""
@@ -441,3 +442,80 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error searching sessions: {e}")
             return []
+
+    # Audio Conversation Management
+    async def save_audio_conversation(self, audio_data: Dict[str, Any]) -> str:
+        """Save audio conversation data"""
+        try:
+            self._check_connection()
+            audio_conversation = AudioConversationData(**audio_data)
+            result = await self.audio_conversations_collection.insert_one(audio_conversation.dict())
+            
+            # Update session to reference audio conversation
+            await self.update_session(audio_conversation.session_id, {
+                "audio_conversation_id": str(result.inserted_id),
+                "has_audio_recording": True
+            })
+            
+            logger.info(f"Saved audio conversation for session: {audio_conversation.session_id}")
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Error saving audio conversation: {e}", exc_info=True)
+            raise
+
+    async def get_audio_conversation(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get audio conversation data by session ID"""
+        try:
+            audio_conversation = await self.audio_conversations_collection.find_one({"session_id": session_id})
+            if audio_conversation:
+                audio_conversation['_id'] = str(audio_conversation['_id'])
+            return audio_conversation
+        except Exception as e:
+            logger.error(f"Error getting audio conversation for session {session_id}: {e}")
+            return None
+
+    async def update_audio_conversation(self, session_id: str, update_data: Dict[str, Any]) -> bool:
+        """Update audio conversation data"""
+        try:
+            result = await self.audio_conversations_collection.update_one(
+                {"session_id": session_id},
+                {"$set": update_data}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            logger.error(f"Error updating audio conversation for session {session_id}: {e}")
+            return False
+
+    async def get_sessions_with_audio(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get sessions that have audio recordings"""
+        try:
+            cursor = self.sessions_collection.find({"has_audio_recording": True}).sort("created_at", -1).limit(limit)
+            sessions = []
+            async for session in cursor:
+                session['_id'] = str(session['_id'])
+                # Get audio conversation data
+                audio_data = await self.get_audio_conversation(session['session_id'])
+                if audio_data:
+                    session['audio_conversation'] = audio_data
+                sessions.append(session)
+            return sessions
+        except Exception as e:
+            logger.error(f"Error getting sessions with audio: {e}")
+            return []
+
+    async def delete_audio_conversation(self, session_id: str) -> bool:
+        """Delete audio conversation data"""
+        try:
+            result = await self.audio_conversations_collection.delete_one({"session_id": session_id})
+            
+            # Update session to remove audio reference
+            if result.deleted_count > 0:
+                await self.update_session(session_id, {
+                    "audio_conversation_id": None,
+                    "has_audio_recording": False
+                })
+            
+            return result.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting audio conversation for session {session_id}: {e}")
+            return False

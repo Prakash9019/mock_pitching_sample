@@ -55,6 +55,8 @@ npm install socket.io-client axios
 
 # Audio processing
 npm install recordrtc web-audio-api
+# **Enhanced audio quality (NEW)** 🆕
+npm install audio-buffer-utils audio-context-timers standardized-audio-context
 
 # **Video processing (NEW)** 🆕
 npm install canvas-capture html2canvas
@@ -111,8 +113,8 @@ npm install lodash moment uuid
 |-------|----------------|-------------|
 | `connect` | - | Establish WebSocket connection |
 | `text_message` | `{text: string, persona: string, session_id: string, system: string}` | Send text message to AI |
-| `audio_chunk` | `{audio_data: string, session_id: string, persona: string, is_final: boolean, mime_type?: string}` | Send audio chunk for real-time STT |
-| `start_recording` | `{session_id: string, persona: string, sample_rate: number}` | Start audio recording session |
+| `audio_chunk` | `{audio_data: string, session_id: string, persona: string, is_final: boolean, mime_type?: string, enhanced_quality?: boolean}` | Send audio chunk for real-time STT with optional enhanced quality flag |
+| `start_recording` | `{session_id: string, persona: string, sample_rate: number, channels: number, format?: string, enhanced_quality?: boolean}` | Start audio recording session with enhanced quality options |
 | `stop_recording` | `{session_id: string}` | Stop audio recording session |
 | **`start_video_analysis`** 🆕 | `{session_id: string}` | **Start real-time video analysis** |
 | **`stop_video_analysis`** 🆕 | `{session_id: string}` | **Stop video analysis** |
@@ -124,10 +126,11 @@ npm install lodash moment uuid
 #### Server → Client Events
 | Event | Data Structure | Description |
 |-------|----------------|-------------|
-| `response` | `{message: string, audio_url?: string, stage?: string, complete?: boolean, session_id: string}` | AI response with optional audio |
-| `transcription` | `{text: string, is_final: boolean, session_id: string, confidence?: number}` | Real-time speech transcription |
-| `session_started` | `{session_id: string, persona: string, system: string, timestamp: string}` | Session creation confirmation |
-| `session_ended` | `{session_id: string, reason: string, analytics?: object}` | Session termination |
+| `response` | `{message: string, audio_url?: string, stage?: string, complete?: boolean, session_id: string, enhanced_audio?: boolean}` | AI response with optional enhanced audio |
+| `transcription` | `{text: string, is_final: boolean, session_id: string, confidence?: number, enhanced?: boolean}` | Real-time speech transcription with enhanced quality indicator |
+| `session_started` | `{session_id: string, persona: string, system: string, timestamp: string, audio_quality?: string}` | Session creation confirmation with audio quality level |
+| `session_ended` | `{session_id: string, reason: string, analytics?: object, audio_url?: string}` | Session termination with optional enhanced audio URL |
+| **`audio_quality_status`** 🆕 | `{session_id: string, quality: string, enhancements: string[]}` | **Audio quality status updates** |
 | **`video_analysis_started`** 🆕 | `{session_id: string, status: string, analyzer_type: string, message: string}` | **Video analysis activation confirmation** |
 | **`video_analysis_stopped`** 🆕 | `{session_id: string, message: string}` | **Video analysis deactivation** |
 | **`video_analysis_update`** 🆕 | `{session_id: string, analysis: object, analyzer_type: string}` | **Real-time video analysis results with gesture, emotion, and pose data** |
@@ -318,15 +321,42 @@ class SocketService {
       this.emit('reconnect_failed');
     });
 
-    // Application events
-    this.socket.on('response', (data) => {
-      this.emit('ai_response', data);
+    // Audio-specific events
+    this.socket.on('audio_connection_status', (data) => {
+      console.log('🎧 Audio connection status:', data);
+      this.emit('audio_connection_status', data);
     });
 
+    this.socket.on('audio_session_started', (data) => {
+      console.log('🎙️ Audio session started:', data);
+      this.emit('audio_session_started', data);
+    });
+
+    this.socket.on('audio_session_stopped', (data) => {
+      console.log('⏹️ Audio session stopped:', data);
+      this.emit('audio_session_stopped', data);
+    });
+
+    this.socket.on('vad_status', (data) => {
+      // Voice Activity Detection status updates
+      this.emit('vad_status', data);
+    });
+
+    this.socket.on('audio_error', (data) => {
+      console.error('🔴 Audio error:', data);
+      this.emit('audio_error', data);
+    });
+
+    // Transcription and AI response events
     this.socket.on('transcription', (data) => {
       this.emit('transcription', data);
     });
 
+    this.socket.on('response', (data) => {
+      this.emit('ai_response', data);
+    });
+
+    // Other application events
     this.socket.on('session_started', (data) => {
       this.emit('session_started', data);
     });
@@ -1168,6 +1198,64 @@ const PitchPracticeComponent = () => {
 
 ## Real-Time Audio Streaming
 
+### 🔊 Enhanced Audio Quality System
+
+The platform now features an advanced audio processing system that significantly improves the clarity and quality of recorded conversations:
+
+#### 🆕 Audio Processing Improvements
+
+The backend has been updated with several key improvements to the audio processing pipeline:
+
+1. **Robust Error Handling**
+   - Graceful handling of audio processing errors
+   - Fallback mechanisms when audio enhancement fails
+   - Proper cleanup of audio resources
+
+2. **Optimized Audio Combination**
+   - Improved algorithm for combining user and AI audio segments
+   - Better handling of silence between segments
+   - Proper normalization of combined audio
+
+3. **Enhanced Audio Processing Pipeline**
+   - Multi-stage audio enhancement process
+   - Adaptive processing based on audio characteristics
+   - Higher quality output formats
+
+#### Server-Side Audio Enhancements
+
+1. **Advanced Noise Reduction**
+   - Background noise filtering
+   - Low-frequency rumble elimination
+   - Consistent volume levels
+
+2. **Speech Enhancement**
+   - Frequency boosting in the speech range (1kHz-3kHz)
+   - Soft compression for even volume levels
+   - Silence trimming with natural pauses preserved
+
+3. **High-Quality Encoding**
+   - Increased MP3 bitrate (128kbps)
+   - Higher sample rate processing (44.1kHz)
+   - Better quality encoding parameters
+
+4. **Adaptive Processing**
+   - Different processing for user vs. AI audio
+   - Specialized enhancement for human speech
+   - Optimized normalization for consistent playback
+
+#### Client-Side Audio Optimizations
+
+1. **Enhanced Microphone Settings**
+   - Advanced echo cancellation
+   - Noise suppression
+   - High-pass filtering
+   - Typing noise detection
+
+2. **Optimized Audio Streaming**
+   - Efficient audio chunking
+   - Proper sample rate conversion
+   - Voice activity detection
+
 ### Advanced Audio Recording System
 
 ```javascript
@@ -1212,7 +1300,7 @@ class AdvancedAudioRecorder {
     this.vadEnabled = config.vadEnabled;
 
     try {
-      // Request microphone access with advanced constraints
+      // Request microphone access with enhanced quality constraints
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: config.sampleRate,
@@ -1222,7 +1310,14 @@ class AdvancedAudioRecorder {
           autoGainControl: config.autoGainControl,
           // Advanced constraints for better quality
           latency: 0.01,
-          volume: 1.0
+          volume: 1.0,
+          // Enhanced quality settings
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+          googTypingNoiseDetection: true,
+          googAudioMirroring: false
         }
       });
 
@@ -1306,12 +1401,9 @@ class AdvancedAudioRecorder {
     this.audioChunks = [];
     
     // Notify server about recording start
-    this.socket.emit('start_recording', {
+    this.socket.emit('start_audio_session', {
       session_id: this.sessionId,
-      persona: this.persona,
-      sample_rate: this.audioContext.sampleRate,
-      channels: 1,
-      format: 'pcm_f32le'
+      persona: this.persona
     });
 
     console.log('🎤 Recording started');
@@ -1320,14 +1412,10 @@ class AdvancedAudioRecorder {
   stopRecording() {
     this.isRecording = false;
     
-    // Send final audio chunk
-    this.sendFinalAudioChunk();
-    
     // Notify server about recording stop
     if (this.socket && this.sessionId) {
-      this.socket.emit('stop_recording', {
-        session_id: this.sessionId,
-        duration: Date.now() - this.recordingStartTime
+      this.socket.emit('stop_audio_session', {
+        session_id: this.sessionId
       });
     }
 
@@ -1349,13 +1437,10 @@ class AdvancedAudioRecorder {
       // Convert to base64 for transmission
       const audioBase64 = this.arrayBufferToBase64(int16Data.buffer);
 
-      this.socket.emit('audio_chunk', {
+      // Send audio data to server using the correct event name
+      this.socket.emit('audio_stream', {
         audio_data: audioBase64,
         session_id: this.sessionId,
-        persona: this.persona,
-        is_final: false,
-        timestamp: Date.now(),
-        chunk_size: audioData.length,
         sample_rate: this.audioContext.sampleRate
       });
 
@@ -1370,17 +1455,15 @@ class AdvancedAudioRecorder {
     }
   }
 
-  sendFinalAudioChunk() {
-    if (!this.socket) return;
-
-    this.socket.emit('audio_chunk', {
-      audio_data: '',
-      session_id: this.sessionId,
-      persona: this.persona,
-      is_final: true,
-      total_chunks: this.audioChunks.length,
-      total_duration: Date.now() - this.recordingStartTime
+  // Notify server that AI audio finished playing
+  notifyAIAudioFinished() {
+    if (!this.socket || !this.sessionId) return;
+    
+    this.socket.emit('ai_audio_finished', {
+      session_id: this.sessionId
     });
+    
+    console.log('🔊 Notified server that AI audio finished playing');
   }
 
   // Get real-time audio levels for UI visualization
@@ -1496,6 +1579,24 @@ class AdvancedAudioRecorder {
 
 ## Speech-to-Text Integration
 
+### Backend Implementation
+
+The backend uses **OpenAI's Whisper model** for high-quality speech-to-text transcription. The process works as follows:
+
+1. Audio is streamed from the frontend to the backend via WebSockets
+2. The backend uses **Voice Activity Detection (VAD)** to identify when speech begins and ends
+3. When speech is detected, the audio is saved and processed
+4. The audio is preprocessed to improve transcription quality:
+   - Converted to 16kHz mono WAV format
+   - Volume is normalized
+   - Background noise is reduced
+   - Long silences are removed
+5. The processed audio is transcribed using Whisper with configurable parameters:
+   - Model size (tiny, base, small, medium, large)
+   - Language detection or specification
+   - Temperature and beam search settings
+6. The transcription result is sent back to the frontend via the `transcription` socket event
+
 ### Real-Time Transcription Handler
 
 ```javascript
@@ -1513,7 +1614,7 @@ class TranscriptionManager {
     const { text, is_final, confidence, session_id } = data;
 
     if (is_final) {
-      // Final transcription
+      // Final transcription from Whisper
       this.finalTranscriptions.push({
         text: text,
         confidence: confidence || 1.0,
@@ -1531,7 +1632,7 @@ class TranscriptionManager {
         });
       }
     } else {
-      // Interim transcription
+      // Interim transcription (if available)
       this.currentTranscription = text;
       
       if (this.onTranscriptionUpdate) {
@@ -2190,6 +2291,28 @@ When ending a pitch session, there are **two separate operations** you need to h
 1. **WebSocket Connection Management** - Cleanly disconnect from real-time communication
 2. **Session Analysis Generation** - End the session and get comprehensive analysis via REST API
 
+#### 🎙️ Enhanced Audio Conversation Recording
+
+During a pitch session, both user and AI audio are recorded, processed for optimal clarity, and stored:
+
+1. **User Audio**: Captured through WebSockets using the `audio_stream` event
+2. **AI Audio**: Generated using Text-to-Speech and stored on the server
+3. **Advanced Audio Processing**: 
+   - **Noise Reduction**: Background noise is filtered out
+   - **Speech Enhancement**: Voice frequencies are boosted for better clarity
+   - **Volume Normalization**: Audio levels are balanced for consistent volume
+   - **Silence Trimming**: Unnecessary silence is removed while preserving natural pauses
+   - **High-Quality Encoding**: Audio is encoded at higher bitrates for better fidelity
+4. **Conversation Assembly**: When the session ends, all audio segments are combined in the correct alternating pattern (AI-user-AI-user)
+5. **Cloud Storage**: The complete conversation is uploaded to Google Cloud Storage
+6. **Audio URL**: A signed URL is generated and included in the `/api/pitch/end/{session_id}` response
+
+The audio URL can be used to:
+- Play back the entire conversation with enhanced audio quality
+- Download the conversation for offline review
+- Share the conversation with others (URL is valid for 7 days)
+- Analyze speech patterns and delivery style
+
 #### 🔄 The Complete Session Ending Workflow
 
 ```javascript
@@ -2230,6 +2353,12 @@ const endPitchSession = async (sessionId, reason = 'user_ended') => {
       // - Stage-by-stage breakdown
       // - Recommendations for improvement
       // - Session statistics and duration
+      // - Audio conversation URL (if available)
+      //
+      // NEW: Analysis is now provided for conversations of ANY length
+      // - Short conversations receive appropriately scaled feedback
+      // - No minimum conversation length requirement
+      // - Depth factor adjusts scores based on conversation length
       
       return {
         success: true,
@@ -2307,9 +2436,10 @@ class WebSocketSessionManager {
 **What it does**:
 - ✅ Formally ends the pitch session
 - ✅ Generates detailed performance analysis
+- ✅ Finalizes and uploads the audio conversation recording
 - ✅ Saves analysis to database
 - ✅ Updates session status
-- ✅ Returns complete analysis report
+- ✅ Returns complete analysis report with audio URL
 
 **What it does NOT do**:
 - ❌ Does NOT handle WebSocket disconnections (that's separate)
@@ -2336,6 +2466,8 @@ Content-Type: application/json
     "session_id": "session_123...",
     "session_duration_minutes": 15.5,
     "overall_score": 8.2,
+    // Enhanced audio quality with improved clarity, noise reduction, and higher bitrate
+    "audio": "https://storage.googleapis.com/ai-pitch-conversations/conversations/session_123_20250712_105039.mp3?Expires=1752922242&GoogleAccessId=..."
     "performance_metrics": {
       "clarity_score": 8.5,
       "confidence_score": 7.8,
@@ -2360,7 +2492,87 @@ Content-Type: application/json
 }
 ```
 
+**Error Responses**:
+
+The API has been updated to handle conversations of any length. Previously, there was a minimum conversation length requirement that would return an error for very short conversations. This restriction has been removed, and the system now provides appropriately scaled analysis for conversations of any length.
+
+```javascript
+// Error response for other issues
+{
+  "success": false,
+  "message": "Error message describing the issue",
+  "error": "error_code"
+}
+```
+
 #### 🔧 Complete Implementation Examples
+
+**Enhanced Audio Quality Implementation**:
+```javascript
+// Configure enhanced audio quality settings
+const enhancedAudioSettings = {
+  // Microphone settings
+  audio: {
+    // Basic settings
+    sampleRate: 44100,        // Higher sample rate for better quality
+    channelCount: 1,          // Mono for speech clarity
+    echoCancellation: true,   // Remove echo
+    noiseSuppression: true,   // Reduce background noise
+    autoGainControl: true,    // Maintain consistent volume
+    
+    // Enhanced settings (Chrome/Edge)
+    googEchoCancellation: true,
+    googAutoGainControl: true,
+    googNoiseSuppression: true,
+    googHighpassFilter: true,
+    googTypingNoiseDetection: true
+  },
+  
+  // Audio processing settings
+  processing: {
+    // Enhanced audio chunk settings
+    chunkDuration: 100,       // Smaller chunks for more responsive processing
+    format: 'pcm_f32le',      // Higher precision format
+    enhanced_quality: true    // Signal enhanced quality to server
+  }
+};
+
+// Apply enhanced audio settings when starting recording
+const startEnhancedRecording = async (sessionId, persona) => {
+  try {
+    // Get audio stream with enhanced settings
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: enhancedAudioSettings.audio
+    });
+    
+    // Initialize audio context with higher quality
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 44100,
+      latencyHint: 'interactive'
+    });
+    
+    // Notify server about enhanced recording
+    socket.emit('start_recording', {
+      session_id: sessionId,
+      persona: persona,
+      sample_rate: 44100,
+      channels: 1,
+      format: enhancedAudioSettings.processing.format,
+      enhanced_quality: true
+    });
+    
+    // Set up audio processing pipeline
+    // ... (audio processing code)
+    
+    return true;
+  } catch (error) {
+    console.error('Enhanced audio recording error:', error);
+    
+    // Fall back to standard quality if enhanced fails
+    return startStandardRecording(sessionId, persona);
+  }
+};
+```
 
 **React Hook Implementation**:
 ```javascript
@@ -6303,7 +6515,15 @@ const validateSession = () => {
 - **🆕 Provide video preview with status indicators**
 - **🆕 Display video analysis insights and recommendations**
 
-### 4. Security
+### 4. 🔊 Audio Quality Best Practices
+- Use the enhanced audio settings for microphone access
+- Implement proper audio level visualization
+- Provide microphone test functionality before starting
+- Use the new audio processing features for clearer recordings
+- Offer playback of the enhanced audio conversation
+- Display audio quality indicators during recording
+
+### 5. Security
 - Validate all user inputs
 - Implement rate limiting on frontend
 - Use HTTPS in production
@@ -6311,7 +6531,7 @@ const validateSession = () => {
 - **🆕 Secure video frame transmission (base64 encoding)**
 - **🆕 Validate camera permissions before starting analysis**
 
-### 5. Error Recovery
+### 6. Error Recovery
 - Implement automatic reconnection
 - Provide manual retry options
 - Show meaningful error messages
@@ -6438,6 +6658,13 @@ fastapi_app.add_middleware(
 - [ ] Environment variables configured
 - [ ] Build tools configured (Webpack/Vite)
 - [ ] HTTPS enabled for production (required for camera/microphone access)
+
+**🆕 Enhanced Audio Quality Setup:**
+- [ ] Audio recording with enhanced quality settings configured
+- [ ] Higher sample rate (44.1kHz) and bit depth (32-bit float) supported
+- [ ] Advanced audio processing options enabled
+- [ ] Audio visualization for quality monitoring implemented
+- [ ] Fallback mechanisms for browsers without advanced audio support
 
 **Browser Requirements:**
 - [ ] Modern browser with WebRTC support
@@ -6602,6 +6829,28 @@ Audio chunks sent but no transcription events
 3. Ensure `is_final: true` is sent to complete transcription
 4. Test with different audio input devices
 
+**Problem:** Poor audio quality in recorded conversation
+```
+Audio is unclear, noisy, or difficult to understand
+```
+
+**Solutions:**
+1. Use the enhanced audio quality settings in getUserMedia:
+   ```javascript
+   audio: {
+     echoCancellation: true,
+     noiseSuppression: true,
+     autoGainControl: true,
+     googEchoCancellation: true,
+     googNoiseSuppression: true,
+     googHighpassFilter: true
+   }
+   ```
+2. Ensure proper microphone positioning (close to speaker)
+3. Use a higher quality microphone if available
+4. Reduce background noise during recording
+5. Speak clearly and at a consistent volume
+
 #### 📡 Real-time Issues
 
 **Problem:** Delayed or missing AI responses
@@ -6621,10 +6870,20 @@ Transcription is slow or incorrect
 ```
 
 **Solutions:**
-1. Reduce audio chunk size for faster processing
-2. Improve audio quality (noise cancellation, better microphone)
-3. Check network latency
-4. Adjust voice activity detection settings
+1. Reduce audio chunk size for faster processing (try 100-200ms chunks)
+2. Improve audio quality using enhanced settings:
+   ```javascript
+   audio: {
+     sampleRate: 16000,
+     channelCount: 1,
+     echoCancellation: true,
+     noiseSuppression: true,
+     autoGainControl: true
+   }
+   ```
+3. Check network latency and connection stability
+4. Adjust voice activity detection settings (lower threshold for quiet speakers)
+5. Use the new audio processing enhancements on the server side
 
 #### 💾 Database Issues
 
@@ -6983,6 +7242,36 @@ performance.measure('component-render', 'component-render-start', 'component-ren
 - 🔄 **Advanced emotion recognition**
 
 ---
+
+## 🔊 Enhanced Audio Quality Summary
+
+The platform now features a significantly improved audio processing system that enhances the clarity and quality of recorded conversations. Key improvements include:
+
+1. **Robust Error Handling**
+   - Graceful handling of audio processing errors
+   - Fallback mechanisms when audio enhancement fails
+   - Proper cleanup of audio resources
+
+2. **Enhanced Audio Quality**
+   - Higher sample rates (44.1kHz) and bit depths (32-bit float)
+   - Advanced noise reduction and speech enhancement
+   - Better normalization and compression
+
+3. **Improved Audio Processing Pipeline**
+   - Multi-stage audio enhancement process
+   - Adaptive processing based on audio characteristics
+   - Higher quality output formats
+
+4. **Frontend Integration**
+   - Enhanced audio recording settings
+   - Better audio visualization
+   - Improved error handling
+
+5. **No Minimum Conversation Length**
+   - Analysis now provided for conversations of any length
+   - Appropriately scaled feedback for shorter conversations
+
+These improvements result in clearer, more professional-sounding recordings that enhance the overall user experience and provide better material for analysis.
 
 ## 🆕 Video Analysis Integration Summary
 

@@ -142,6 +142,14 @@ async def get_database():
     """Dependency to get database instance"""
     return db_manager.get_database()
 
+def get_database_service():
+    """Get database service instance"""
+    from app.services.database_service import DatabaseService
+    database = db_manager.get_database()
+    if database is not None:
+        return DatabaseService(database)
+    return None
+
 # Database connection functions
 async def connect_to_mongo():
     """Connect to MongoDB on startup"""

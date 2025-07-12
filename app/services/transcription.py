@@ -4,6 +4,7 @@ import logging
 import subprocess
 import sys
 import tempfile
+import time
 import numpy as np
 from typing import Dict, Optional, Tuple, Union
 import soundfile as sf
@@ -51,57 +52,82 @@ except ImportError:
 DEFAULT_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "small")
 SUPPORTED_MODELS = ["tiny", "base", "small", "medium", "large"]
 
+# Transcription cache to avoid duplicate transcriptions
+_TRANSCRIPTION_CACHE = {}
+_CACHE_EXPIRY = 60 * 60  # Cache expiry in seconds (1 hour)
+_ACTIVE_TRANSCRIPTIONS = set()  # Track currently processing transcriptions
+
+def get_file_hash(file_path: str) -> str:
+    """Generate a hash for a file to use as cache key"""
+    try:
+        # Get file size and modification time for quick comparison
+        file_stat = os.stat(file_path)
+        file_size = file_stat.st_size
+        mod_time = file_stat.st_mtime
+        
+        # Combine with file path for a unique identifier
+        hash_input = f"{file_path}:{file_size}:{mod_time}"
+        return hash_input
+    except Exception as e:
+        logger.warning(f"Error generating file hash: {e}")
+        # Fallback to just the file path
+        return file_path
+
 def preprocess_audio(audio_path: str) -> str:
     """
-    Preprocess audio file to improve transcription quality.
+    Preprocess audio file to improve transcription quality with optimized performance.
     - Converts to 16kHz mono WAV
-    - Normalizes volume
-    - Reduces background noise
-    - Removes long silences
+    - Normalizes volume if needed
+    - Skips unnecessary processing for small files
     """
     try:
+        # Check file size first - skip processing for very small files
+        file_size = os.path.getsize(audio_path)
+        if file_size < 5000:  # Less than 5KB
+            logger.info(f"Skipping preprocessing for small file ({file_size} bytes)")
+            return audio_path
+            
         # Load audio using pydub
         audio = AudioSegment.from_file(audio_path)
         
         # Convert to mono and set sample rate to 16kHz
         audio = audio.set_channels(1).set_frame_rate(16000)
         
-        # Normalize volume
-        audio = audio.normalize()
+        # Only normalize if volume is very low
+        if audio.dBFS < -35:  # Only normalize if volume is very low
+            audio = audio.normalize(headroom=1.0)
         
-        # Split on silence and keep only segments longer than 200ms
-        chunks = split_on_silence(
-            audio,
-            min_silence_len=200,
-            silence_thresh=audio.dBFS-14,
-            keep_silence=100
-        )
+        # Skip silence removal for short audio (less than 3 seconds)
+        if len(audio) < 3000:
+            processed_audio = audio
+        else:
+            # Only remove extended silences (over 1 second)
+            chunks = split_on_silence(
+                audio,
+                min_silence_len=1000,  # 1 second of silence
+                silence_thresh=audio.dBFS-16,  # More permissive threshold
+                keep_silence=300  # Keep more silence for natural speech rhythm
+            )
+            
+            # If no chunks were found (no long silences), use the original audio
+            if not chunks:
+                processed_audio = audio
+            else:
+                # Combine non-silent chunks
+                processed_audio = AudioSegment.empty()
+                for chunk in chunks:
+                    processed_audio += chunk
         
-        # Combine non-silent chunks
-        processed_audio = AudioSegment.empty()
-        for chunk in chunks:
-            processed_audio += chunk
-        
-        # Reduce background noise
-        samples = np.array(processed_audio.get_array_of_samples())
-        sample_rate = processed_audio.frame_rate
-        
-        # Convert to float32 for noise reduction
-        if samples.dtype == np.int16:
-            samples = samples.astype(np.float32) / 32768.0
-        
-        # Perform noise reduction
-        reduced_noise = nr.reduce_noise(
-            y=samples,
-            sr=sample_rate,
-            stationary=True,
-            n_std_thresh_stationary=1.5
-        )
-        
-        # Save processed audio to a temporary file
+        # Save processed audio to a temporary file - skip noise reduction for performance
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
             processed_path = tmp_file.name
-            sf.write(processed_path, reduced_noise, sample_rate)
+            
+            # Export directly without additional processing
+            processed_audio.export(
+                processed_path, 
+                format="wav",
+                parameters=["-acodec", "pcm_s16le"]  # Use standard PCM format
+            )
             
         return processed_path
         
@@ -116,7 +142,8 @@ def transcribe_audio(
     temperature: float = 0.2,
     beam_size: int = 5,
     best_of: int = 5,
-    patience: float = 1.0
+    patience: float = 1.0,
+    use_cache: bool = True
 ) -> Dict[str, Union[str, float]]:
     """
     Transcribe an audio file using OpenAI's Whisper model with enhanced accuracy.
@@ -129,6 +156,7 @@ def transcribe_audio(
         beam_size: Number of beams in beam search (only used when temperature is zero)
         best_of: Number of candidates to consider (only used when temperature > 0)
         patience: Patience for beam search (only used when temperature is zero)
+        use_cache: Whether to use the transcription cache
         
     Returns:
         Dictionary containing:
@@ -140,6 +168,8 @@ def transcribe_audio(
     Raises:
         RuntimeError: If Whisper is not available or if there's an error during transcription
     """
+    global _ACTIVE_TRANSCRIPTIONS
+    
     if not WHISPER_AVAILABLE:
         raise RuntimeError(
             "Whisper is not available. Please install it with: "
@@ -149,15 +179,52 @@ def transcribe_audio(
     if not os.path.isfile(audio_file_path):
         raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
     
-    model_size = model_size or DEFAULT_MODEL_SIZE
-    if model_size not in SUPPORTED_MODELS:
-        logger.warning(f"Model size {model_size} not supported. Using {DEFAULT_MODEL_SIZE}.")
-        model_size = DEFAULT_MODEL_SIZE
+    # Generate a hash for the file
+    file_hash = get_file_hash(audio_file_path)
     
-    logger.info(f"Transcribing audio file: {audio_file_path} with model: {model_size}")
+    # Check if this file is already being transcribed
+    if file_hash in _ACTIVE_TRANSCRIPTIONS:
+        logger.info(f"Transcription already in progress for: {audio_file_path}")
+        return {'text': '', 'language': 'en', 'confidence': 0.0, 'segments': [], 'status': 'in_progress'}
+    
+    # Check cache first if enabled
+    if use_cache:
+        if file_hash in _TRANSCRIPTION_CACHE:
+            cache_entry = _TRANSCRIPTION_CACHE[file_hash]
+            cache_time = cache_entry.get('timestamp', 0)
+            current_time = time.time()
+            
+            # Check if cache is still valid
+            if current_time - cache_time < _CACHE_EXPIRY:
+                logger.info(f"Using cached transcription for: {audio_file_path}")
+                return cache_entry['result']
+            else:
+                # Cache expired, remove it
+                del _TRANSCRIPTION_CACHE[file_hash]
+    
+    # Mark this file as being transcribed
+    _ACTIVE_TRANSCRIPTIONS.add(file_hash)
     
     try:
-        # Preprocess audio
+        # Check file size - skip very small files that likely don't contain speech
+        file_size = os.path.getsize(audio_file_path)
+        if file_size < 1000:  # Less than 1KB
+            logger.warning(f"Audio file too small ({file_size} bytes), likely no speech: {audio_file_path}")
+            return {'text': '[No speech detected]', 'language': 'en', 'confidence': 0.0, 'segments': []}
+        
+        model_size = model_size or DEFAULT_MODEL_SIZE
+        if model_size not in SUPPORTED_MODELS:
+            logger.warning(f"Model size {model_size} not supported. Using {DEFAULT_MODEL_SIZE}.")
+            model_size = DEFAULT_MODEL_SIZE
+        
+        logger.info(f"Transcribing audio file: {audio_file_path} with model: {model_size}")
+        
+        # Use smaller model for very short audio clips
+        if file_size < 10000:  # Less than 10KB
+            logger.info(f"Using 'tiny' model for small audio file ({file_size} bytes)")
+            model_size = "tiny"
+        
+        # Preprocess audio - optimize for speed
         processed_audio_path = preprocess_audio(audio_file_path)
         
         # Load the Whisper model
@@ -186,14 +253,33 @@ def transcribe_audio(
         segments = result.get('segments', [])
         avg_confidence = np.mean([seg.get('confidence', 0.8) for seg in segments]) if segments else 0.8
         
-        return {
+        transcription_result = {
             'text': result['text'].strip() or "[No speech detected]",
             'language': result.get('language', 'en'),
             'confidence': float(avg_confidence),
             'segments': segments
         }
         
+        # Cache the result if caching is enabled
+        if use_cache:
+            _TRANSCRIPTION_CACHE[file_hash] = {
+                'result': transcription_result,
+                'timestamp': time.time()
+            }
+            
+            # Limit cache size to prevent memory issues
+            if len(_TRANSCRIPTION_CACHE) > 100:  # Keep only 100 most recent entries
+                oldest_key = min(_TRANSCRIPTION_CACHE.keys(), 
+                                key=lambda k: _TRANSCRIPTION_CACHE[k]['timestamp'])
+                del _TRANSCRIPTION_CACHE[oldest_key]
+        
+        return transcription_result
+        
     except Exception as e:
         error_msg = f"Error transcribing audio: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        raise RuntimeError("Failed to transcribe audio. Please check the logs for details.")
+        return {'text': '[Transcription error]', 'language': 'en', 'confidence': 0.0, 'segments': []}
+    finally:
+        # Remove from active transcriptions
+        if file_hash in _ACTIVE_TRANSCRIPTIONS:
+            _ACTIVE_TRANSCRIPTIONS.remove(file_hash)

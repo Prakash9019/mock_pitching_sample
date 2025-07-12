@@ -349,6 +349,14 @@ class EnhancedHybridVAD {
                     this.isAISpeaking = false;
                     this.callbacks.onTTSEnd?.({ message, source: 'server' });
                     
+                    // Notify backend that AI audio finished
+                    if (this.socket && this.currentSessionId) {
+                        this.socket.emit('ai_audio_finished', {
+                            session_id: this.currentSessionId
+                        });
+                        this.log('Notified backend: AI audio finished');
+                    }
+                    
                     // Clean up
                     URL.revokeObjectURL(audioUrl);
                     this.currentAudio = null;
@@ -807,7 +815,7 @@ class EnhancedHybridVAD {
                 this.log('Audio context resumed from suspended state');
             }
             
-            this.log(`Audio context initialized (state: ${this.audioContext.state})`);
+            this.log(`Audio context initialized (state: ${this.audioContext.state}, sampleRate: ${this.audioContext.sampleRate}Hz)`);
         } catch (error) {
             this.log(`Audio context initialization failed: ${error.message}`, 'error');
             // Don't throw error, allow app to continue without audio context
@@ -1007,7 +1015,9 @@ class EnhancedHybridVAD {
             const sendPromise = new Promise((resolve, reject) => {
                 this.socket.emit('audio_stream', {
                     session_id: this.currentSessionId,
-                    audio_data: audioData
+                    audio_data: audioData,
+                    sample_rate: this.audioContext ? this.audioContext.sampleRate : 44100,
+                    duration: audioData.length / (this.audioContext ? this.audioContext.sampleRate : 44100) / 2  // Int16 = 2 bytes per sample
                 }, (ack) => {
                     // Handle acknowledgment if the server supports it
                     if (ack && ack.status === 'error') {

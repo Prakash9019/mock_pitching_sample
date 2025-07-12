@@ -74,6 +74,10 @@ from app.database import connect_to_mongo, close_mongo_connection, get_database,
 from app.services.database_service import DatabaseService
 from app.models import PitchAnalysis, PitchSession
 
+# Import audio storage service
+from app.services.audio_conversation_storage import finalize_session_recording, get_session_audio_info
+from app.services.audio_websocket_handler import get_session_audio_url
+
 # Integration example import removed - focusing on audio conversation
 
 # Initialize FastAPI app
@@ -158,6 +162,10 @@ templates = Jinja2Templates(directory=os.path.join(BASE_PATH, "templates"))
 
 # Global database service instance
 db_service: Optional[DatabaseService] = None
+
+def get_database_service() -> Optional[DatabaseService]:
+    """Get the global database service instance"""
+    return db_service
 
 # Database startup and shutdown events
 @fastapi_app.on_event("startup")
@@ -275,6 +283,11 @@ async def database_test_page(request: Request):
     """Serve the Database Connection Test page"""
     return templates.TemplateResponse("database_test.html", {"request": request})
 
+@fastapi_app.get("/debug-user-audio", response_class=HTMLResponse)
+async def debug_user_audio_page(request: Request):
+    """Serve the Debug User Audio page"""
+    return templates.TemplateResponse("debug_user_audio.html", {"request": request})
+
 @fastapi_app.get("/api/database/test")
 async def test_database():
     """Test database connection"""
@@ -309,6 +322,57 @@ async def database_status():
         "connection_string": "mongodb://localhost:27017" if db_service else None,
         "status": "connected" if db_service else "disconnected"
     }
+
+@fastapi_app.get("/api/audio/monitoring")
+async def audio_monitoring():
+    """Monitor audio system status and transcription usage"""
+    try:
+        from app.services.audio_websocket_handler import get_audio_websocket_handler
+        from app.services.audio_conversation_storage import get_storage_stats, get_session_audio_info
+        
+        # Get active sessions from audio handler
+        handler = get_audio_websocket_handler()
+        active_sessions = handler.get_active_sessions() if handler else {}
+        
+        # Get storage statistics
+        storage_stats = get_storage_stats()
+        
+        # Get detailed session audio info
+        session_audio_details = {}
+        for session_id in active_sessions.keys():
+            audio_info = get_session_audio_info(session_id)
+            if audio_info:
+                session_audio_details[session_id] = audio_info
+        
+        return {
+            "status": "healthy",
+            "active_sessions": len(active_sessions),
+            "sessions_detail": {
+                session_id: {
+                    "persona": data.get("persona"),
+                    "status": data.get("status"),
+                    "audio_recording": data.get("audio_recording_enabled", False),
+                    "ai_speaking": data.get("ai_speaking", False),
+                    "user_can_speak": data.get("user_can_speak", True),
+                    "conversation_turn": data.get("conversation_turn", "unknown")
+                }
+                for session_id, data in active_sessions.items()
+            },
+            "session_audio_details": session_audio_details,
+            "storage_stats": storage_stats,
+            "websocket_handlers": {
+                "audio_handler_active": handler is not None,
+                "vad_available": VAD_AVAILABLE,
+                "video_analysis_available": VIDEO_ANALYSIS_AVAILABLE
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting audio monitoring data: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "active_sessions": 0
+        }
 
 
 @fastapi_app.get("/api/tts/test")
@@ -733,6 +797,150 @@ async def test_persona_voice(persona: str):
         logger.error(f"Error testing persona voice: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to test persona voice")
 
+# Audio Conversation Management Endpoints
+@fastapi_app.get("/api/audio/conversations")
+async def get_audio_conversations(limit: int = 50):
+    """Get list of all audio conversations"""
+    try:
+        from app.services.audio_conversation_storage import list_conversation_files
+        
+        files = list_conversation_files(limit)
+        return {
+            "conversations": files,
+            "total": len(files),
+            "message": f"Retrieved {len(files)} audio conversations"
+        }
+    except Exception as e:
+        logger.error(f"Error getting audio conversations: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get audio conversations")
+
+@fastapi_app.get("/api/audio/conversation/{session_id}")
+async def get_session_audio_conversation(session_id: str):
+    """Get audio conversation data for a specific session"""
+    try:
+        db_service = get_database_service()
+        if not db_service:
+            raise HTTPException(status_code=500, detail="Database service not available")
+        
+        # Get audio conversation from database
+        audio_conversation = await db_service.get_audio_conversation(session_id)
+        if not audio_conversation:
+            raise HTTPException(status_code=404, detail="Audio conversation not found")
+        
+        return {
+            "session_id": session_id,
+            "audio_conversation": audio_conversation,
+            "message": "Audio conversation retrieved successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session audio conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get session audio conversation")
+
+@fastapi_app.get("/api/audio/sessions-with-audio")
+async def get_sessions_with_audio(limit: int = 50):
+    """Get sessions that have audio recordings"""
+    try:
+        db_service = get_database_service()
+        if not db_service:
+            raise HTTPException(status_code=500, detail="Database service not available")
+        
+        sessions = await db_service.get_sessions_with_audio(limit)
+        return {
+            "sessions": sessions,
+            "total": len(sessions),
+            "message": f"Retrieved {len(sessions)} sessions with audio recordings"
+        }
+    except Exception as e:
+        logger.error(f"Error getting sessions with audio: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get sessions with audio")
+
+@fastapi_app.delete("/api/audio/conversation/{session_id}")
+async def delete_session_audio_conversation(session_id: str):
+    """Delete audio conversation for a specific session"""
+    try:
+        db_service = get_database_service()
+        if not db_service:
+            raise HTTPException(status_code=500, detail="Database service not available")
+        
+        # Get audio conversation data first
+        audio_conversation = await db_service.get_audio_conversation(session_id)
+        if not audio_conversation:
+            raise HTTPException(status_code=404, detail="Audio conversation not found")
+        
+        # Delete from Google Cloud Storage
+        from app.services.audio_conversation_storage import delete_conversation_file
+        filename = audio_conversation.get('audio_filename')
+        if filename:
+            storage_deleted = delete_conversation_file(filename)
+            if not storage_deleted:
+                logger.warning(f"Failed to delete audio file from storage: {filename}")
+        
+        # Delete from database
+        db_deleted = await db_service.delete_audio_conversation(session_id)
+        if not db_deleted:
+            raise HTTPException(status_code=500, detail="Failed to delete audio conversation from database")
+        
+        return {
+            "session_id": session_id,
+            "message": "Audio conversation deleted successfully",
+            "storage_deleted": storage_deleted if filename else False,
+            "database_deleted": db_deleted
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting session audio conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete session audio conversation")
+
+@fastapi_app.post("/api/audio/finalize/{session_id}")
+async def finalize_session_audio(session_id: str):
+    """Manually finalize audio recording for a session and get GCP URL"""
+    try:
+        logger.info(f"Manually finalizing audio for session {session_id}")
+        
+        # Finalize audio recording
+        audio_url = finalize_session_recording(session_id, use_mp3=True)
+        
+        if audio_url:
+            audio_info = get_session_audio_info(session_id)
+            return {
+                "success": True,
+                "message": "Audio recording finalized successfully",
+                "audio_url": audio_url,
+                "audio_info": audio_info
+            }
+        else:
+            raise HTTPException(status_code=404, detail="No audio recording found for this session")
+            
+    except Exception as e:
+        logger.error(f"Error finalizing audio for session {session_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to finalize audio: {str(e)}")
+
+@fastapi_app.get("/api/audio/storage-info")
+async def get_audio_storage_info():
+    """Get information about audio storage configuration"""
+    try:
+        from app.services.audio_conversation_storage import audio_storage_service
+        
+        # Check if storage is properly configured
+        storage_available = audio_storage_service.client is not None and audio_storage_service.bucket is not None
+        
+        return {
+            "storage_available": storage_available,
+            "bucket_name": audio_storage_service.bucket_name,
+            "storage_provider": "Google Cloud Storage",
+            "audio_formats_supported": ["wav", "mp3"],
+            "default_format": audio_storage_service.format,
+            "sample_rate": audio_storage_service.sample_rate,
+            "channels": audio_storage_service.channels,
+            "message": "Audio storage configuration retrieved"
+        }
+    except Exception as e:
+        logger.error(f"Error getting audio storage info: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get audio storage info")
+
 @fastapi_app.get("/api/debug/conversations")
 async def debug_conversations():
     """Debug: Show all active conversations"""
@@ -1034,7 +1242,17 @@ async def get_pitch_analysis_report(session_id: str):
         analysis = generate_pitch_analysis_report(session_id)
         
         if "error" in analysis:
-            raise HTTPException(status_code=404, detail=analysis["error"])
+            if analysis["error"] == "conversation_too_short":
+                # Special handling for short conversations
+                return {
+                    "success": False,
+                    "error": "conversation_too_short",
+                    "message": analysis.get("message", "The conversation is too short for meaningful analysis."),
+                    "minimum_required": analysis.get("minimum_required", 3),
+                    "current_count": analysis.get("founder_messages", 0)
+                }
+            else:
+                raise HTTPException(status_code=404, detail=analysis["error"])
         
         # Save the analysis to database
         try:
@@ -1086,7 +1304,17 @@ async def end_pitch_session(session_id: str, request: Request):
         analysis_result = await end_pitch_session_async(session_id, reason)
         
         if "error" in analysis_result:
-            raise HTTPException(status_code=404, detail=analysis_result["error"])
+            if analysis_result["error"] == "conversation_too_short":
+                # Special handling for short conversations
+                return {
+                    "success": False,
+                    "error": "conversation_too_short",
+                    "message": analysis_result.get("message", "The conversation is too short for meaningful analysis."),
+                    "minimum_required": analysis_result.get("minimum_required", 3),
+                    "current_count": analysis_result.get("founder_messages", 0)
+                }
+            else:
+                raise HTTPException(status_code=404, detail=analysis_result["error"])
         
         # The analysis_result IS the analysis (not wrapped in another dict)
         analysis = analysis_result
@@ -1096,11 +1324,55 @@ async def end_pitch_session(session_id: str, request: Request):
         # Database operations are already handled by end_pitch_session_async
         logger.info(f"Session {session_id} ended successfully via API")
         
-        return {
+        # Get audio URL - first try the cached URL from the websocket handler
+        audio_url = None
+        audio_info = None
+        try:
+            # First check if we have a cached URL from the websocket handler
+            cached_url = get_session_audio_url(session_id)
+            if cached_url:
+                logger.info(f"Found cached audio URL for session {session_id}: {cached_url}")
+                audio_url = cached_url
+                # No need to get audio_info as the session is already finalized
+            else:
+                # If no cached URL, try to finalize the recording
+                logger.info(f"No cached URL found, finalizing audio recording for session {session_id}")
+                
+                # Force MP3 format for smaller file size and better compatibility
+                audio_url = finalize_session_recording(session_id, use_mp3=True)
+                if audio_url:
+                    logger.info(f"Audio recording finalized successfully: {audio_url}")
+                    audio_info = get_session_audio_info(session_id)
+                else:
+                    # If no audio URL, try to create a fallback recording
+                    logger.warning(f"No audio recording found for session {session_id}, attempting fallback...")
+                    from app.services.audio_conversation_storage import start_session_recording, add_user_audio, add_ai_audio
+                    
+                    # Create a fallback recording with dummy data if needed
+                    start_session_recording(session_id, "friendly")
+                    
+                    # Try to finalize again
+                    audio_url = finalize_session_recording(session_id, use_mp3=True)
+                    if audio_url:
+                        logger.info(f"Fallback audio recording created: {audio_url}")
+                    else:
+                        logger.error(f"Failed to create fallback audio recording for session {session_id}")
+        except Exception as e:
+            logger.error(f"Error finalizing audio recording: {str(e)}")
+            # Don't fail the entire request if audio finalization fails
+        
+        response_data = {
             "success": True,
             "message": "Session ended successfully",
-            "analysis": analysis
+            "analysis": analysis,
+            # Always include audio field, even if URL is None
+            "audio": {
+                "url": audio_url,
+                "info": audio_info
+            }
         }
+        
+        return response_data
         
     except HTTPException:
         raise
@@ -1175,335 +1447,9 @@ async def get_formatted_pitch_report(session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to get report: {str(e)}")
 
 
-@sio.event
-async def connect(sid, environ):
-    logger.info(f"WebSocket connected: {sid}")
+# WebSocket handlers removed to prevent conflicts with audio_websocket_handler.py
+# All real-time audio processing is now handled by the dedicated audio handler
 
-@sio.event
-async def text_message(sid, data):
-    """Handle real-time transcribed text messages
-    
-    Args:
-        sid: Socket.IO session ID
-        data: Message data (can be string or dict with text, system, persona)
-    """
-    try:
-        logger.info(f"Received message from {sid}")
-        
-        # Extract message data
-        if isinstance(data, dict):
-            message_text = data.get('text', '').strip()
-            system = data.get('system', 'workflow')
-            persona = data.get('persona', 'friendly')
-            session_id = data.get('session_id', sid)  # Use provided session_id or fallback to sid
-        else:
-            # Backward compatibility
-            message_text = str(data).strip()
-            system = 'workflow'
-            persona = 'friendly'
-            session_id = sid
-        
-        if not message_text:
-            logger.warning("Received empty message")
-            await sio.emit("error", {"message": "Empty message received"}, to=sid)
-            return
-        
-        logger.info(f"Processing message for {session_id} using {system} system")
-        
-        try:
-            # Check if we need to start a new session
-            is_new_session = False
-            
-            if system == "improved":
-                # Check if improved agent is available
-                if not improved_agent:
-                    raise Exception("Improved AI agent not initialized")
-                
-                # Check if conversation exists
-                if not hasattr(improved_agent, 'conversations') or session_id not in improved_agent.conversations:
-                    logger.info(f"Starting new improved conversation for {session_id}")
-                    improved_agent.start_conversation(session_id, persona)
-                    is_new_session = True
-                
-                # Process message with improved agent
-                response_data = generate_improved_response(session_id, message_text)
-                
-                # Format response
-                response = {
-                    "message": response_data.get("response", ""),
-                    "stage": response_data.get("current_stage", "introduction"),
-                    "complete": response_data.get("is_complete", False),
-                    "insights": {
-                        "suggestions": response_data.get("suggestions", []),
-                        "key_points": response_data.get("key_points", [])
-                    },
-                    "type": "improved"
-                }
-                
-            else:  # Default to workflow
-                # Check if workflow is available
-                if not pitch_workflow:
-                    raise Exception("LangGraph workflow not initialized")
-                
-                # Check if this is a new session by checking if we have the session in memory
-                # For simplicity, we'll treat each WebSocket connection as potentially new
-                # and let the workflow handle session state internally
-                
-                # Try to process the message - if session doesn't exist, it will return an error
-                logger.info(f"Attempting to process message with existing session: {session_id}")
-                response_data = handle_practice_message(session_id, message_text)
-                logger.info(f"Response from handle_practice_message: {response_data}")
-                
-                # Check if we got an error response (session doesn't exist)
-                if isinstance(response_data, dict) and "error" in response_data:
-                    # Session doesn't exist, start a new one with the user's message
-                    logger.info(f"Starting new workflow session with message for {session_id}: {response_data.get('error')}")
-                    response_data = start_pitch_session_with_message(session_id, persona, message_text)
-                    is_new_session = True
-                    logger.info(f"Session started with message: {response_data}")
-                    
-                    # If we still get an error, fall back to greeting
-                    if isinstance(response_data, dict) and "error" in response_data:
-                        logger.warning(f"Still getting error after starting session with message: {response_data.get('error')}")
-                        response_data = {
-                            "message": "Hello! I'm excited to hear your pitch. Please introduce yourself and your company.",
-                            "stage": "greeting",
-                            "complete": False,
-                            "insights": {}
-                        }
-                
-                # Format response
-                response = {
-                    "message": response_data.get("message", ""),
-                    "stage": response_data.get("stage", "introduction"),
-                    "complete": response_data.get("complete", False),
-                    "insights": response_data.get("insights", {}),
-                    "type": "workflow"
-                }
-            
-            # Generate audio response and wait for completion
-            if response["message"]:
-                # Use timestamp to ensure unique audio files and prevent caching issues
-                timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-                audio_filename = f"{session_id}_response_{timestamp}.mp3"
-                response_audio_path = os.path.join(RESPONSE_DIR, audio_filename)
-                
-                # Run TTS in thread pool and wait for completion
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    None,
-                    convert_text_to_speech_with_persona,
-                    response["message"],
-                    persona,
-                    response_audio_path
-                )
-                response["audio_url"] = f"/download/{audio_filename}"
-                logger.info(f"Audio generated and ready at: {response_audio_path}")
-                
-                # Clean up old audio files for this session (keep only last 5)
-                try:
-                    cleanup_old_audio_files(session_id)
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to cleanup old audio files: {cleanup_error}")
-            
-            # Send response
-            await sio.emit("response", response, to=sid)
-            
-            # Send session started event if new
-            if is_new_session:
-                await sio.emit("session_started", {
-                    "session_id": session_id,
-                    "system": system,
-                    "persona": persona,
-                    "message": "New session started"
-                }, to=sid)
-            
-            logger.info(f"Sent response to {sid} for session {session_id}")
-            
-        except Exception as e:
-            logger.error(f"Error processing message: {str(e)}", exc_info=True)
-            await sio.emit("error", {
-                "message": f"Error processing message: {str(e)}",
-                "type": "error"
-            }, to=sid)
-            
-    except Exception as e:
-        logger.error(f"Unexpected error in text_message: {str(e)}", exc_info=True)
-        try:
-            await sio.emit("error", {
-                "message": "Internal server error",
-                "type": "error"
-            }, to=sid)
-        except:
-            pass  # Socket might be disconnected
-
-@sio.event
-async def audio_chunk(sid, data):
-    """Handle incoming audio chunks, transcribe, and respond with AI-generated audio.
-    
-    This endpoint processes audio chunks and routes them to either the LangGraph workflow
-    or improved AI agent based on the system parameter.
-    
-    For new implementations, it's recommended to use the text-based WebSocket endpoint.
-    """
-    try:
-        logger.info(f"Received audio chunk from {sid}")
-        
-        # Extract audio data and parameters from the incoming message
-        if isinstance(data, dict) and 'audio' in data:
-            audio_data = data['audio']
-            persona = data.get('persona', 'friendly')  # Default to 'friendly' if not provided
-            system = data.get('system', 'workflow')    # Default to 'workflow' if not provided
-            session_id = data.get('session_id', sid)   # Use provided session_id or fallback to sid
-        else:
-            # Backward compatibility with older clients (legacy mode)
-            audio_data = data
-            persona = 'friendly'
-            system = 'workflow'
-            session_id = sid
-        
-        # Save the incoming audio to a temporary file for transcription
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_audio:
-            temp_audio.write(audio_data)
-            temp_audio_path = temp_audio.name
-        
-        try:
-            logger.info("Starting transcription...")
-            transcription_result = transcribe_audio(temp_audio_path)
-            transcript_text = transcription_result.get('text', '').strip()
-            confidence = transcription_result.get('confidence', 0.0)
-            
-            if not transcript_text:
-                logger.warning("Empty transcription result")
-                await sio.emit("error", {
-                    "message": "Could not transcribe audio. Please try again.",
-                    "type": "transcription_error"
-                }, to=sid)
-                return
-                
-            logger.info(f"Transcription complete (confidence: {confidence:.2f}): {transcript_text[:100]}...")
-            
-            # Process the transcribed text using the appropriate system
-            try:
-                if system == "improved":
-                    if not improved_agent:
-                        raise Exception("Improved AI agent not initialized")
-                    
-                    # Check if conversation exists for improved agent
-                    if not hasattr(improved_agent, 'conversations') or session_id not in improved_agent.conversations:
-                        logger.info(f"Starting new improved conversation for {session_id}")
-                        improved_agent.start_conversation(session_id, persona)
-                    
-                    # Process message with improved agent
-                    response_data = generate_improved_response(session_id, transcript_text)
-                    
-                    # Format response
-                    response = {
-                        "message": response_data.get("response", ""),
-                        "stage": response_data.get("current_stage", "introduction"),
-                        "complete": response_data.get("is_complete", False),
-                        "insights": {
-                            "suggestions": response_data.get("suggestions", []),
-                            "key_points": response_data.get("key_points", [])
-                        },
-                        "type": "improved",
-                        "transcript": transcript_text
-                    }
-                    
-                else:  # Default to workflow
-                    if not pitch_workflow:
-                        raise Exception("LangGraph workflow not initialized")
-                    
-                    # Try to process the message - if session doesn't exist, it will return an error
-                    response_data = handle_practice_message(session_id, transcript_text)
-                    
-                    # Check if we got an error response (session doesn't exist)
-                    if isinstance(response_data, dict) and "error" in response_data:
-                        # Session doesn't exist, start a new one
-                        logger.info(f"Starting new workflow session for {session_id}: {response_data.get('error')}")
-                        session_start_result = start_practice_session(session_id, persona)
-                        
-                        # Now process the user's message with the new session
-                        response_data = handle_practice_message(session_id, transcript_text)
-                        
-                        # If we still get an error, fall back to greeting
-                        if isinstance(response_data, dict) and "error" in response_data:
-                            logger.warning(f"Still getting error after starting session: {response_data.get('error')}")
-                            response_data = {
-                                "message": session_start_result.get("message", "Hello! I'm excited to hear your pitch. Please introduce yourself and your company."),
-                                "stage": session_start_result.get("stage", "greeting"),
-                                "complete": False,
-                                "insights": {}
-                            }
-                    
-                    # Format response
-                    response = {
-                        "message": response_data.get("message", ""),
-                        "stage": response_data.get("stage", "introduction"),
-                        "complete": response_data.get("complete", False),
-                        "insights": response_data.get("insights", {}),
-                        "type": "workflow",
-                        "transcript": transcript_text
-                    }
-                
-                # Generate audio response and wait for completion
-                if response["message"]:
-                    response_audio_path = os.path.join(RESPONSE_DIR, f"{session_id}_latest_response.mp3")
-                    # Run TTS in thread pool and wait for completion
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None,
-                        convert_text_to_speech_with_persona,
-                        response["message"],
-                        persona,
-                        response_audio_path
-                    )
-                    response["audio_url"] = f"/download/{session_id}_latest_response.mp3"
-                    logger.info(f"Audio generated and ready at: {response_audio_path}")
-                
-                # Send the response back to the client
-                await sio.emit("response", response, to=sid)
-                
-                logger.info(f"Sent response to {sid} for session {session_id}")
-                
-            except Exception as e:
-                logger.error(f"Error processing message: {str(e)}", exc_info=True)
-                await sio.emit("error", {
-                    "message": f"Error processing message: {str(e)}",
-                    "type": "processing_error"
-                }, to=sid)
-            
-        except Exception as e:
-            logger.error(f"Error processing audio chunk: {str(e)}", exc_info=True)
-            await sio.emit("error", {
-                "message": f"Error processing audio: {str(e)}",
-                "type": "audio_processing_error"
-            }, to=sid)
-            
-        finally:
-            # Clean up the temporary file
-            try:
-                if os.path.exists(temp_audio_path):
-                    os.unlink(temp_audio_path)
-            except Exception as e:
-                logger.warning(f"Failed to delete temporary file {temp_audio_path}: {e}")
-                
-    except Exception as e:
-        logger.error(f"WebSocket error in audio_chunk: {str(e)}", exc_info=True)
-        try:
-            await sio.emit("error", {
-                "message": "Internal server error",
-                "type": "server_error"
-            }, to=sid)
-        except:
-            pass  # Socket might be disconnected
-
-
-@sio.event
-async def disconnect(sid):
-    logger.info(f"WebSocket disconnected: {sid}")
-
-# This block is only for direct execution with `python main.py`
 if __name__ == "__main__":
     import uvicorn
     import os

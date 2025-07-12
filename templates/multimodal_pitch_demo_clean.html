@@ -370,7 +370,7 @@
                 </div>
 
                 <!-- Conversation Log -->
-                <div class="glass-effect rounded-2xl p-6">
+                <div class="glass-effect rounded-2xl p-6 mb-6">
                     <h3 class="text-xl font-semibold text-white mb-4">💬 Conversation</h3>
                     
                     <div id="conversation-log" class="bg-black/30 rounded-xl p-4 h-80 overflow-y-auto space-y-3">
@@ -382,6 +382,72 @@
                                 <div>🧍 Body Pose Detection</div>
                             </div>
                             <div class="mt-4 text-white/60">Start a session to begin your pitch practice...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audio Conversation Recording -->
+                <div class="glass-effect rounded-2xl p-6">
+                    <h3 class="text-xl font-semibold text-white mb-4">🎵 Audio Recording</h3>
+                    
+                    <div class="bg-black/30 rounded-xl p-4">
+                        <!-- Recording Status -->
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center space-x-2">
+                                <div id="recording-indicator" class="w-3 h-3 rounded-full bg-gray-500"></div>
+                                <span id="recording-status" class="text-white/80 text-sm">Ready to Record</span>
+                            </div>
+                            <div id="recording-duration" class="text-white/60 text-sm">00:00</div>
+                        </div>
+                        
+                        <!-- Audio Info -->
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div class="bg-white/5 rounded-lg p-3">
+                                <div class="text-white/60 text-xs mb-1">User Audio</div>
+                                <div id="user-segments" class="text-white font-medium">0 segments</div>
+                                <div id="user-duration" class="text-white/80 text-sm">0.0s</div>
+                            </div>
+                            <div class="bg-white/5 rounded-lg p-3">
+                                <div class="text-white/60 text-xs mb-1">AI Audio</div>
+                                <div id="ai-segments" class="text-white font-medium">0 segments</div>
+                                <div id="ai-duration" class="text-white/80 text-sm">0.0s</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Audio Player (shown after session ends) -->
+                        <div id="audio-player-container" class="hidden">
+                            <div class="bg-white/5 rounded-lg p-4 mb-3">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-white/80 text-sm">📁 Conversation Audio</span>
+                                    <span id="audio-format" class="text-white/60 text-xs">WAV</span>
+                                </div>
+                                <audio id="conversation-audio" controls class="w-full">
+                                    <source id="audio-source" src="" type="audio/wav">
+                                    Your browser does not support the audio element.
+                                </audio>
+                            </div>
+                            
+                            <!-- Audio Actions -->
+                            <div class="flex space-x-2">
+                                <button id="download-audio-btn" onclick="downloadAudio()" 
+                                        class="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-sm py-2 px-3 rounded-lg transition-colors">
+                                    📥 Download
+                                </button>
+                                <button id="share-audio-btn" onclick="shareAudio()" 
+                                        class="flex-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm py-2 px-3 rounded-lg transition-colors">
+                                    🔗 Share Link
+                                </button>
+                                <button id="include-in-analysis-btn" onclick="toggleAudioInAnalysis()" 
+                                        class="flex-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-sm py-2 px-3 rounded-lg transition-colors">
+                                    📊 Include in Analysis
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Recording Info -->
+                        <div class="text-white/40 text-xs mt-3">
+                            <div>💡 Audio conversations are automatically recorded and stored securely</div>
+                            <div>🔒 Recordings include both your voice and AI responses for analysis</div>
                         </div>
                     </div>
                 </div>
@@ -531,6 +597,9 @@
                 
                 log('📊 Step 5: Setting up video analysis listeners...');
                 setupVideoAnalysisEventListeners();
+                
+                log('🎵 Step 5.5: Setting up audio conversation listeners...');
+                setupAudioConversationEventListeners();
                 
                 // Start real-time metrics updates with Edge-specific timing
                 log('📈 Step 6: Starting real-time metrics...');
@@ -821,6 +890,10 @@
                 addMessage('system', '📊 Live metrics updating based on your performance');
                 addMessage('system', '🎯 Begin your pitch - all systems are analyzing your presentation!');
                 
+                // Start audio recording
+                startAudioRecording();
+                addMessage('system', '🎵 Audio conversation recording started');
+                
                 // Reset live feedback displays
                 updateLiveFeedback('currentGesture', '👋 Analyzing gestures...');
                 updateLiveFeedback('currentEmotion', '😊 Analyzing expressions...');
@@ -878,6 +951,11 @@
                 addMessage('system', '⏹️ Enhanced Practice Session Ended');
                 addMessage('system', '📊 Enhanced video analysis stopped');
                 addMessage('system', '🔬 CVZone, FER, and MediaPipe analysis deactivated');
+                addMessage('system', '🎵 Processing audio conversation...');
+                
+                // Stop audio recording (will be updated with URL when available)
+                stopAudioRecording();
+                
                 addMessage('system', '📈 Check your performance metrics above for insights');
                 log('✅ Enhanced session stopped');
                 
@@ -982,11 +1060,19 @@
             addMessage('user', data.transcript);
             userActivity.speechCount++;
             updateStatus('audioStatusText', 'Processing', 'warning');
+            
+            // Update user audio segment count (estimate 3 seconds per segment)
+            onUserAudioSegment(3.0);
         }
 
         function handleAIResponse(data) {
             log(`🤖 AI response: ${data.message}`);
             addMessage('ai', data.message);
+            
+            // Estimate AI audio duration based on text length (average 150 words per minute)
+            const wordCount = data.message.split(' ').length;
+            const estimatedDuration = (wordCount / 150) * 60; // Convert to seconds
+            onAIAudioSegment(estimatedDuration);
         }
 
         function handleTTSStart(data) {
@@ -1106,6 +1192,67 @@
             });
 
             log('✅ Video analysis event listeners set up');
+        }
+
+        // Audio Conversation Event Listeners
+        function setupAudioConversationEventListeners() {
+            if (!enhancedVAD || !enhancedVAD.socket) {
+                log('⚠️ Socket not available for audio conversation events');
+                return;
+            }
+
+            // Audio conversation recording started
+            enhancedVAD.socket.on('audio_recording_started', (data) => {
+                log(`🎵 Audio recording started for session: ${data.session_id}`);
+                addMessage('system', '🎵 Audio conversation recording active');
+                updateRecordingStatus('Recording', 'success');
+            });
+
+            // Audio conversation recording completed
+            enhancedVAD.socket.on('audio_recording_completed', (data) => {
+                log(`🎵 Audio recording completed: ${data.audio_url}`);
+                addMessage('system', '🎵 Audio conversation saved successfully');
+                
+                // Update UI with completed recording
+                stopAudioRecording(data.audio_url);
+                
+                if (data.audio_info) {
+                    // Update audio recording data with actual values
+                    audioRecordingData = {
+                        userSegments: data.audio_info.user_segments || audioRecordingData.userSegments,
+                        aiSegments: data.audio_info.ai_segments || audioRecordingData.aiSegments,
+                        userDuration: data.audio_info.user_duration || audioRecordingData.userDuration,
+                        aiDuration: data.audio_info.ai_duration || audioRecordingData.aiDuration
+                    };
+                    updateAudioInfo();
+                }
+                
+                addMessage('system', '📥 Audio available for download and analysis');
+            });
+
+            // Audio conversation upload progress
+            enhancedVAD.socket.on('audio_upload_progress', (data) => {
+                log(`🎵 Audio upload progress: ${data.progress}%`);
+                updateRecordingStatus(`Uploading ${data.progress}%`, 'warning');
+            });
+
+            // Audio conversation error
+            enhancedVAD.socket.on('audio_recording_error', (data) => {
+                log(`❌ Audio recording error: ${data.error}`, 'error');
+                addMessage('system', `❌ Audio recording error: ${data.error}`);
+                updateRecordingStatus('Error', 'error');
+            });
+
+            // Audio segment processed (real-time updates)
+            enhancedVAD.socket.on('audio_segment_processed', (data) => {
+                if (data.segment_type === 'user') {
+                    onUserAudioSegment(data.duration || 3.0);
+                } else if (data.segment_type === 'ai') {
+                    onAIAudioSegment(data.duration || 2.0);
+                }
+            });
+
+            log('✅ Audio conversation event listeners set up');
         }
 
         function handleVideoAnalysisUpdate(data) {
@@ -1510,6 +1657,208 @@
             messageDiv.innerHTML = messageContent;
             conversationLog.appendChild(messageDiv);
             conversationLog.scrollTop = conversationLog.scrollHeight;
+        }
+
+        // Audio Recording Functions
+        let recordingStartTime = null;
+        let recordingTimer = null;
+        let currentAudioUrl = null;
+        let audioRecordingData = {
+            userSegments: 0,
+            aiSegments: 0,
+            userDuration: 0,
+            aiDuration: 0
+        };
+
+        function startAudioRecording() {
+            recordingStartTime = Date.now();
+            updateRecordingStatus('Recording', 'success');
+            
+            // Start timer
+            recordingTimer = setInterval(updateRecordingTimer, 1000);
+            
+            // Reset audio data
+            audioRecordingData = {
+                userSegments: 0,
+                aiSegments: 0,
+                userDuration: 0,
+                aiDuration: 0
+            };
+            
+            updateAudioInfo();
+            log('🎵 Audio recording started');
+        }
+
+        function stopAudioRecording(audioUrl = null) {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            
+            updateRecordingStatus('Processing...', 'warning');
+            
+            if (audioUrl) {
+                currentAudioUrl = audioUrl;
+                showAudioPlayer(audioUrl);
+                updateRecordingStatus('Completed', 'success');
+                log('🎵 Audio recording completed with URL');
+            } else {
+                updateRecordingStatus('Ready to Record', 'default');
+                log('🎵 Audio recording stopped');
+            }
+        }
+
+        function updateRecordingStatus(status, type) {
+            const statusElement = document.getElementById('recording-status');
+            const indicatorElement = document.getElementById('recording-indicator');
+            
+            if (statusElement) {
+                statusElement.textContent = status;
+            }
+            
+            if (indicatorElement) {
+                let className = 'w-3 h-3 rounded-full ';
+                switch (type) {
+                    case 'success':
+                        className += 'bg-green-500';
+                        if (status === 'Recording') {
+                            className += ' animate-pulse';
+                        }
+                        break;
+                    case 'warning':
+                        className += 'bg-yellow-500 animate-pulse';
+                        break;
+                    case 'error':
+                        className += 'bg-red-500';
+                        break;
+                    default:
+                        className += 'bg-gray-500';
+                }
+                indicatorElement.className = className;
+            }
+        }
+
+        function updateRecordingTimer() {
+            if (!recordingStartTime) return;
+            
+            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            
+            const durationElement = document.getElementById('recording-duration');
+            if (durationElement) {
+                durationElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+
+        function updateAudioInfo() {
+            const userSegmentsElement = document.getElementById('user-segments');
+            const userDurationElement = document.getElementById('user-duration');
+            const aiSegmentsElement = document.getElementById('ai-segments');
+            const aiDurationElement = document.getElementById('ai-duration');
+            
+            if (userSegmentsElement) {
+                userSegmentsElement.textContent = `${audioRecordingData.userSegments} segments`;
+            }
+            if (userDurationElement) {
+                userDurationElement.textContent = `${audioRecordingData.userDuration.toFixed(1)}s`;
+            }
+            if (aiSegmentsElement) {
+                aiSegmentsElement.textContent = `${audioRecordingData.aiSegments} segments`;
+            }
+            if (aiDurationElement) {
+                aiDurationElement.textContent = `${audioRecordingData.aiDuration.toFixed(1)}s`;
+            }
+        }
+
+        function showAudioPlayer(audioUrl) {
+            const playerContainer = document.getElementById('audio-player-container');
+            const audioSource = document.getElementById('audio-source');
+            const audioElement = document.getElementById('conversation-audio');
+            
+            if (playerContainer && audioSource && audioElement) {
+                audioSource.src = audioUrl;
+                audioElement.load();
+                playerContainer.classList.remove('hidden');
+                
+                // Determine format from URL
+                const formatElement = document.getElementById('audio-format');
+                if (formatElement) {
+                    const format = audioUrl.includes('.mp3') ? 'MP3' : 'WAV';
+                    formatElement.textContent = format;
+                }
+            }
+        }
+
+        function downloadAudio() {
+            if (currentAudioUrl) {
+                const link = document.createElement('a');
+                link.href = currentAudioUrl;
+                link.download = `pitch-conversation-${sessionId || 'session'}.${currentAudioUrl.includes('.mp3') ? 'mp3' : 'wav'}`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                addMessage('system', '📥 Audio conversation downloaded');
+                log('📥 Audio downloaded');
+            }
+        }
+
+        function shareAudio() {
+            if (currentAudioUrl) {
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Pitch Practice Audio',
+                        text: 'My AI pitch practice conversation',
+                        url: currentAudioUrl
+                    }).then(() => {
+                        addMessage('system', '🔗 Audio shared successfully');
+                    }).catch(err => {
+                        copyToClipboard(currentAudioUrl);
+                    });
+                } else {
+                    copyToClipboard(currentAudioUrl);
+                }
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                addMessage('system', '🔗 Audio URL copied to clipboard');
+                log('🔗 Audio URL copied to clipboard');
+            }).catch(err => {
+                addMessage('system', '❌ Failed to copy URL');
+            });
+        }
+
+        function toggleAudioInAnalysis() {
+            const button = document.getElementById('include-in-analysis-btn');
+            if (button) {
+                const isIncluded = button.textContent.includes('✅');
+                if (isIncluded) {
+                    button.innerHTML = '📊 Include in Analysis';
+                    button.className = button.className.replace('bg-green-500/20 hover:bg-green-500/30 text-green-300', 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300');
+                    addMessage('system', '📊 Audio removed from analysis');
+                } else {
+                    button.innerHTML = '✅ Included in Analysis';
+                    button.className = button.className.replace('bg-purple-500/20 hover:bg-purple-500/30 text-purple-300', 'bg-green-500/20 hover:bg-green-500/30 text-green-300');
+                    addMessage('system', '📊 Audio included in analysis');
+                }
+            }
+        }
+
+        // Update audio recording data when user speaks
+        function onUserAudioSegment(duration) {
+            audioRecordingData.userSegments++;
+            audioRecordingData.userDuration += duration;
+            updateAudioInfo();
+        }
+
+        // Update audio recording data when AI speaks
+        function onAIAudioSegment(duration) {
+            audioRecordingData.aiSegments++;
+            audioRecordingData.aiDuration += duration;
+            updateAudioInfo();
         }
 
         function updateRealtimeMetrics() {

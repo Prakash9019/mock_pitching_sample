@@ -104,6 +104,10 @@ class PitchSession(BaseModel):
     message_count: int = 0
     topics_covered: List[str] = []
     
+    # Audio conversation reference
+    audio_conversation_id: Optional[str] = None
+    has_audio_recording: bool = False
+    
     # Analysis reference
     analysis_id: Optional[str] = None
     has_analysis: bool = False
@@ -115,6 +119,41 @@ class ConversationMessage(BaseModel):
     persona: Optional[str] = None
     audio_file: Optional[str] = None
     transcription_confidence: Optional[float] = None
+
+class AudioConversationData(BaseModel):
+    """Model for storing audio conversation metadata"""
+    session_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Audio file information
+    audio_file_url: Optional[str] = None
+    audio_filename: Optional[str] = None
+    audio_format: str = "wav"  # wav or mp3
+    file_size_bytes: Optional[int] = None
+    
+    # Audio metrics
+    total_duration_seconds: Optional[float] = None
+    user_speaking_duration: Optional[float] = None
+    ai_speaking_duration: Optional[float] = None
+    silence_duration: Optional[float] = None
+    
+    # Segment counts
+    user_audio_segments: int = 0
+    ai_audio_segments: int = 0
+    total_segments: int = 0
+    
+    # Quality metrics
+    audio_quality_score: Optional[float] = None  # 0-1 score
+    background_noise_level: Optional[float] = None
+    
+    # Storage information
+    storage_provider: str = "google_cloud_storage"
+    bucket_name: Optional[str] = None
+    upload_timestamp: Optional[datetime] = None
+    
+    # Analysis integration
+    included_in_analysis: bool = False
+    analysis_notes: Optional[str] = None
 
 class ConversationLog(BaseModel):
     session_id: str
